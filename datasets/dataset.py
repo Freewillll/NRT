@@ -17,7 +17,7 @@ sys.setrecursionlimit(30000)
 
 class GenericDataset(tudata.Dataset):
 
-    def __init__(self, split_file, phase='train', imgshape=(32, 64, 64), seq_node_nums=5):
+    def __init__(self, split_file, phase='train', imgshape=(32, 64, 64), seq_node_nums=8):
         self.data_list = self.load_data_list(split_file, phase)
         self.imgshape = imgshape
         print(f'Image shape of {phase}: {imgshape}')
@@ -66,6 +66,7 @@ class GenericDataset(tudata.Dataset):
 
         if tree is not None and self.phase != 'test':
             tree = trim_out_of_box(tree, img[0].shape, True)
+            print(f'the len of tree after trim : {len(tree)}')
             seq_list = swc_to_forest(tree)
             print(seq_list)
             # pad the seq_item 
@@ -76,10 +77,12 @@ class GenericDataset(tudata.Dataset):
                     maxlen = len(seq)
                     maxlen_idx = idx
                 for seq_item in seq:
+                    print(seq_item)
                     if len(seq_item) < self.seq_node_nums:
                         for i in range(self.seq_node_nums - len(seq_item)):
                             seq_item.append([0, 0, 0, 0])
                     else:
+                        print(len(seq_item))
                         raise ValueError
                 
             seq = np.array(seq_list[maxlen_idx])
@@ -92,11 +95,11 @@ class GenericDataset(tudata.Dataset):
 if __name__ == '__main__':
     split_file = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task002_ntt_256/data_splits.pkl'
     idx = 5
-    imgshape = (64, 128, 128)
+    imgshape = (32, 64, 64)
     dataset = GenericDataset(split_file, 'train', imgshape=imgshape)
     img, lab, *_ = dataset.pull_item(idx)
     print(torch.max(img))
-    print(lab)
+    print(lab.shape)
     print(img.shape)
     # import matplotlib.pyplot as plt
     # from utils.image_util import *

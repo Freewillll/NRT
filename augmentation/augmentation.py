@@ -23,6 +23,16 @@ from batchgenerators.augmentations.utils import create_zero_centered_coordinate_
 from NRT.utils import image_util
 
 
+def has_fg(tree, imgshape):
+    for line in tree:
+        _, _, x, y, z, *_ = line
+        if x > 0 and x < imgshape[2] - 1 \
+            and y > 0 and y < imgshape[1] - 1 \
+            and z > 0 and z < imgshape[0] - 1:
+            return True
+    return False
+
+
 def get_random_shape(img, scale_range, per_axis):
     if type(img) == np.ndarray and img.size > 1024:
         shape = np.array(img[0].shape)
@@ -390,12 +400,11 @@ class RandomScale(AbstractTransform):
 
 # verified
 class ScaleToFixedSize(AbstractTransform):
-    def __init__(self, p, target_shape, anti_aliasing=False, mode='edge', update_spacing=True):
+    def __init__(self, p, target_shape, anti_aliasing=False, mode='edge'):
         super(ScaleToFixedSize, self).__init__(p)
         self.target_shape = np.array(target_shape)
         self.anti_aliasing = anti_aliasing
         self.mode = mode
-        self.update_spacing = update_spacing
 
     def __call__(self, img, tree=None):
         if np.random.random() < self.p:
@@ -407,7 +416,7 @@ class ScaleToFixedSize(AbstractTransform):
 
 
 class RandomCrop(AbstractTransform):
-    def __init__(self, p=0.5, imgshape=None, crop_range=(0.85, 1), per_axis=True, force_fg_sampling=False):
+    def __init__(self, p=0.5, imgshape=None, crop_range=(0.85, 1), per_axis=True, force_fg_sampling=True):
         super(RandomCrop, self).__init__(p)
         self.imgshape = imgshape
         self.crop_range = crop_range
@@ -425,19 +434,16 @@ class RandomCrop(AbstractTransform):
         else:
             if self.force_fg_sampling:
                 num_trail = 0
-                while num_trail < 3:
+                while num_trail < 10:
                     shape, target_shape = get_random_shape(self.imgshape, self.crop_range, self.per_axis)
                     new_img, new_tree= random_crop_image_4D(img, tree, target_shape)
                     # check foreground existence
-                    has_fg = False
-                    if np.sum(new_tree) > 10:
-                        has_fg = True
-                    if has_fg:
+                    if has_fg(new_tree, self.imgshape):
                         break
 
                     num_trail += 1
                 else:
-                    print("No foreground found after three random crops!")
+                    print("No foreground found after ten random crops!")
             else:
                 shape, target_shape = get_random_shape(self.imgshape, self.crop_range, self.per_axis)
                 new_img, new_tree = random_crop_image_4D(img, tree, target_shape)

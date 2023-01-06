@@ -4,10 +4,6 @@ from collections import defaultdict
 from pylib.swc_handler import parse_swc, write_swc, get_child_dict
 
 
-def filterout_critial_points(node):
-    return node.tag != 5
-
-
 def is_in_box(x, y, z, imgshape):
     """
     imgshape must be in (z,y,x) order
