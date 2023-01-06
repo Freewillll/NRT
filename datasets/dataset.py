@@ -8,8 +8,8 @@ import sys
 import os
 
 from pylib.swc_handler import parse_swc
-from augmentation.augmentation import InstanceAugmentation
-from datasets.swc_processing import trim_out_of_box, swc_to_forest
+from NRT.augmentation.augmentation import InstanceAugmentation
+from NRT.datasets.swc_processing import trim_out_of_box, swc_to_forest
 
 # To avoid the recursionlimit error
 sys.setrecursionlimit(30000)
@@ -67,15 +67,22 @@ class GenericDataset(tudata.Dataset):
         if tree is not None and self.phase != 'test':
             tree = trim_out_of_box(tree, img[0].shape, True)
             seq_list = swc_to_forest(tree)
+            print(seq_list)
             # pad the seq_item 
-            for seq in seq_list:
+            maxlen_idx = 0
+            maxlen = 0
+            for idx, seq in enumerate(seq_list):
+                if maxlen < len(seq):
+                    maxlen = len(seq)
+                    maxlen_idx = idx
                 for seq_item in seq:
                     if len(seq_item) < self.seq_node_nums:
                         for i in range(self.seq_node_nums - len(seq_item)):
                             seq_item.append([0, 0, 0, 0])
                     else:
                         raise ValueError
-            seq = np.array(seq_list[0])
+                
+            seq = np.array(seq_list[maxlen_idx])
             return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(seq.astype(np.float32)), imgfile
         else:
             lab = np.random.random(5, 5) > 0.5
@@ -83,13 +90,13 @@ class GenericDataset(tudata.Dataset):
 
 
 if __name__ == '__main__':
-    split_file = '/PBshare/SEU-ALLEN/Users/Gaoyu/neuronSegSR/Task501_neuron/data_splits.pkl'
+    split_file = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task002_ntt_256/data_splits.pkl'
     idx = 5
     imgshape = (64, 128, 128)
     dataset = GenericDataset(split_file, 'train', imgshape=imgshape)
     img, lab, *_ = dataset.pull_item(idx)
     print(torch.max(img))
-    print(lab.shape)
+    print(lab)
     print(img.shape)
     # import matplotlib.pyplot as plt
     # from utils.image_util import *

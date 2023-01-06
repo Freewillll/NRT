@@ -115,16 +115,13 @@ def swc_to_forest(tree, p_idx=-2):
             seq = []
             dfs(idx, 0, child_dict, tree)
             sorted(level_dict)
-            print(level_dict)
             for key in level_dict:
-                level_seq = []
+                seq_item = []
                 for idx in level_dict[key]:
                     node = tree.get_node(idx)
-                    print(idx)
-                    print(node)
-                    level_seq.append(list(node.data) + [node.tag])
-                seq.append(level_seq)
-            seq_list.append(np.array(seq))
+                    seq_item.append(list(node.data) + [node.tag])
+                seq.append(seq_item)
+            seq_list.append(seq)
             Trees.append(tree)
             level_dict.clear()
         return seq_list

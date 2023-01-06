@@ -15,7 +15,7 @@ from pylib.swc_handler import parse_swc, write_swc
 from pylib.path_util import get_file_prefix
 from pylib.file_io import *
 
-from utils.image_util import normalize_normal
+from NRT.utils.image_util import normalize_normal
 
 
 def load_data(data_dir, img_shape=[128, 256, 256], is_train=True):
@@ -81,7 +81,7 @@ class GenericPreprocessor(object):
         args_list = []
         for imgfile, swcfile, *_ in data_list:
             prefix = get_file_prefix(imgfile)
-            # print(imgfile, swcfile)
+            #print(imgfile, swcfile)
             imgfile_out = os.path.join(output_dir, f'{prefix}.npz')
             # swcfile_out = os.path.join(output_dir, f'{prefix}.pkl')
             # imgfile_out = os.path.join(output_dir, f'{prefix}.npy')
@@ -125,10 +125,10 @@ class GenericPreprocessor(object):
 
 
 if __name__ == '__main__':
-    data_dir = '/PBshare/SEU-ALLEN/Users/Gaoyu/neuronSegSR/dataset'
-    output_dir = '/PBshare/SEU-ALLEN/Users/Gaoyu/neuronSegSR/test_neuron_256_512_512'
-    is_train = False
+    data_dir = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/dataset'
+    output_dir = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task002_ntt_256'
+    is_train = True
     num_threads = 16
     gp = GenericPreprocessor()
-    gp.run(data_dir, output_dir, img_shape=[256, 512, 512], is_train=is_train, num_threads=num_threads)
-    gp.dataset_split(output_dir, val_ratio=0, test_ratio=1.0, seed=1024, img_ext='.npz', lab_ext='.swc')
+    gp.run(data_dir, output_dir, img_shape=[128, 256, 256], is_train=is_train, num_threads=num_threads)
+    gp.dataset_split(output_dir, val_ratio=0.1, test_ratio=0.1, seed=1024, img_ext='.npz', lab_ext='.swc')

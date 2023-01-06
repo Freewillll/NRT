@@ -20,7 +20,7 @@ from batchgenerators.augmentations.utils import create_zero_centered_coordinate_
     interpolate_img, rotate_coords_2d, rotate_coords_3d, scale_coords, elastic_deform_coordinates_2, \
     resize_multichannel_image
 
-from utils import image_util
+from NRT.utils import image_util
 
 
 def get_random_shape(img, scale_range, per_axis):
@@ -401,7 +401,7 @@ class ScaleToFixedSize(AbstractTransform):
         if np.random.random() < self.p:
             shape = np.array(img[0].shape)
             img, tree = image_scale_4D(img, tree, shape, self.target_shape, self.mode,
-                                                      self.anti_aliasing, self.update_spacing)
+                                                      self.anti_aliasing)
 
         return img, tree
 
@@ -427,10 +427,10 @@ class RandomCrop(AbstractTransform):
                 num_trail = 0
                 while num_trail < 3:
                     shape, target_shape = get_random_shape(self.imgshape, self.crop_range, self.per_axis)
-                    new_img, new_gt= random_crop_image_4D(img, tree, target_shape)
+                    new_img, new_tree= random_crop_image_4D(img, tree, target_shape)
                     # check foreground existence
                     has_fg = False
-                    if np.sum(new_gt) > 10:
+                    if np.sum(new_tree) > 10:
                         has_fg = True
                     if has_fg:
                         break
