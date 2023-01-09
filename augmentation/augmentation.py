@@ -24,12 +24,15 @@ from NRT.utils import image_util
 
 
 def has_fg(tree, imgshape):
+    fg_nums = 0
     for line in tree:
         _, _, x, y, z, *_ = line
         if x > 0 and x < imgshape[2] - 1 \
             and y > 0 and y < imgshape[1] - 1 \
             and z > 0 and z < imgshape[0] - 1:
-            return True
+            fg_nums += 1
+            if fg_nums >= 10:
+                return True
     return False
 
 

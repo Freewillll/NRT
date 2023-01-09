@@ -139,8 +139,10 @@ class TransformerDeconder(nn.Module):
             ]))
 
     def forward(self, x, encoder, input_len):
-        attn_pad_mask = get_attn_pad_mask(dec_inputs, dec_inputs)
-        attn_subsequent_mask = get_attn_subsequent_mask(dec_inputs)
+        # shape of x:   b, seq_len, seq_item_len, vec_len
+        mask_input = x[:, :, 0, -1] > 0
+        attn_pad_mask = get_attn_pad_mask(mask_input, mask_input)
+        attn_subsequent_mask = get_attn_subsequent_mask(mask_input)
 
         attn_mask = torch.gt((attn_pad_mask + attn_subsequent_mask), 0)
         if attn_mask:  # attn_mask: [b_size x len_q x len_k]
