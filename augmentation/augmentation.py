@@ -19,8 +19,14 @@ from skimage import exposure
 from batchgenerators.augmentations.utils import create_zero_centered_coordinate_mesh, elastic_deform_coordinates, \
     interpolate_img, rotate_coords_2d, rotate_coords_3d, scale_coords, elastic_deform_coordinates_2, \
     resize_multichannel_image
+import sys 
+import os 
 
-from NRT.utils import image_util
+current = os.path.dirname(os.path.realpath(__file__))
+parent = os.path.dirname(current)
+sys.path.append(parent)
+
+from utils import image_util
 
 
 def has_fg(tree, imgshape):

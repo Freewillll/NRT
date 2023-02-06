@@ -3,6 +3,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
+import sys
+import os 
+
+current = os.path.dirname(os.path.realpath(__file__))
+parent = os.path.dirname(current)
+sys.path.append(parent)
 
 from datasets.dataset import *
 from models.modules import ConvDropoutNonlinNorm, ConvDropoutNormNonlin

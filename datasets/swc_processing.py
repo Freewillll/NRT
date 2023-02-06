@@ -1,7 +1,7 @@
 import numpy as np
 from treelib import Tree
 from collections import defaultdict
-from pylib.swc_handler import parse_swc, write_swc, get_child_dict
+from swc_handler import parse_swc, write_swc, get_child_dict
 
 
 def is_in_box(x, y, z, imgshape):

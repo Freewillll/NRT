@@ -6,11 +6,18 @@ import skimage.morphology as morphology
 from PIL import ImageEnhance
 from PIL import  Image
 import glob
+import sys
+import os 
 
-from pylib.swc_handler import *
-from pylib.file_io import *
-from pylib.path_util import *
-from NRT.datasets.swc_processing import *
+current = os.path.dirname(os.path.realpath(__file__))
+parent = os.path.dirname(current)
+sys.path.append(parent)
+
+
+from swc_handler import *
+from file_io import *
+from path_util import *
+from datasets.swc_processing import *
 
 
 def convert_color_g(img):

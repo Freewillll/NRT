@@ -11,11 +11,16 @@ from multiprocessing.pool import Pool
 import pickle
 from fnmatch import fnmatch, fnmatchcase
 
-from pylib.swc_handler import parse_swc, write_swc
-from pylib.path_util import get_file_prefix
-from pylib.file_io import *
+from swc_handler import parse_swc, write_swc
+from path_util import get_file_prefix
+from file_io import *
+import sys
 
-from NRT.utils.image_util import normalize_normal
+current = os.path.dirname(os.path.realpath(__file__))
+parent = os.path.dirname(current)
+sys.path.append(parent)
+
+from utils.image_util import normalize_normal
 
 
 def load_data(data_dir, img_shape=[128, 256, 256], is_train=True):

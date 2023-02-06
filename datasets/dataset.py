@@ -7,12 +7,18 @@ import torch
 import sys
 import os
 
-from pylib.swc_handler import parse_swc
-from NRT.augmentation.augmentation import InstanceAugmentation
-from NRT.datasets.swc_processing import trim_out_of_box, swc_to_forest
+current = os.path.dirname(os.path.realpath(__file__))
+parent = os.path.dirname(current)
+sys.path.append(parent)
+
+
+from swc_handler import parse_swc
+from augmentation.augmentation import InstanceAugmentation
+from datasets.swc_processing import trim_out_of_box, swc_to_forest
 
 # To avoid the recursionlimit error
 sys.setrecursionlimit(30000)
+
 
 PAD = 0
 EOS = 6
@@ -63,7 +69,7 @@ def draw_lab(lab, lab_image):
     # filter out invalid  point
     nodes = lab[lab[:, :, -1] > 0]
     # keep the position of nodes in the range of imgshape
-    nodes = np.clip(nodes, [0,0,0,0], [i -1 for i in imgshape] + [5]).astype(int)[:,:-1]
+    nodes = np.clip(nodes, [0,0,0,0], [i -1 for i in imgshape] + [EOS]).astype(int)[:,:-1]
     # draw nodes
     for node in nodes:
         lab_image[node[0], node[1], node[2]] = 1
@@ -158,8 +164,8 @@ class GenericDataset(tudata.Dataset):
             # print(f'----------maxlen idx : {maxlen_idx}')
             seq = np.array(seq_list[maxlen_idx])
             # add eos
-            eos = np.zeros((self.seq_node_nums, self.node_dim))
-            eos[:, -1] = EOS
+            eos = np.zeros((1, self.seq_node_nums, self.node_dim))
+            eos[:, :, -1] = EOS
             seq = np.concatenate((seq, eos), axis=0)
             return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(seq.astype(np.float32)), imgfile, swcfile
         else:
@@ -172,11 +178,11 @@ if __name__ == '__main__':
     import skimage.morphology as morphology
     import cv2 as cv
     from torch.utils.data.distributed import DistributedSampler
-    import NRT.utils.util as util
+    import utils.util as util
 
 
     split_file = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task002_ntt_256/data_splits.pkl'
-    idx = 5
+    idx = 1
     imgshape = (32, 64, 64)
     dataset = GenericDataset(split_file, 'train', imgshape=imgshape)
 
@@ -195,13 +201,14 @@ if __name__ == '__main__':
     img, lab, *_ = dataset.pull_item(idx)
     lab_image = np.zeros(img.shape[1:])
     print(lab_image.shape)
+    print(lab)
     lab = lab.numpy()
     lab_image = draw_lab(lab, lab_image)
     
 
     import matplotlib.pyplot as plt
-    from NRT.utils.image_util import *
-    from NRT.datasets.mip import *
+    from utils.image_util import *
+    from datasets.mip import *
 
     img = unnormalize_normal(img.numpy()).astype(np.uint8)[0]
     lab_image = unnormalize_normal(lab_image).astype(np.uint8)[0]
