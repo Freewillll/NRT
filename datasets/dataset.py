@@ -158,7 +158,9 @@ class GenericDataset(tudata.Dataset):
             # print(f'----------maxlen idx : {maxlen_idx}')
             seq = np.array(seq_list[maxlen_idx])
             # add eos
-            seq = np.concatenate((seq, np.ones((self.seq_node_nums, self.node_dim)) * EOS), axis=0)
+            eos = np.zeros((self.seq_node_nums, self.node_dim))
+            eos[:, -1] = EOS
+            seq = np.concatenate((seq, eos), axis=0)
             return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(seq.astype(np.float32)), imgfile, swcfile
         else:
             lab = np.random.random((5, self.seq_node_nums, self.node_dim)) > 0.5
