@@ -14,6 +14,8 @@ from NRT.datasets.swc_processing import trim_out_of_box, swc_to_forest
 # To avoid the recursionlimit error
 sys.setrecursionlimit(30000)
 
+PAD = 0
+EOS = 6
 
 def collate_fn(batch):
 
@@ -36,6 +38,7 @@ def collate_fn(batch):
     output_seq = []
     output_img = []
     output_imgfile = []
+    output_swcfile = []
     for data in batch:
         seq = data[1][:seq_len]
         # pad shape  (pad_len, item_len, vec_len)
@@ -45,11 +48,12 @@ def collate_fn(batch):
         
         output_img.append(data[0].tolist())
         output_seq.append(seq)
-        output_imgfile.append(data[-1])
+        output_imgfile.append(data[-2])
+        output_swcfile.append(data[-1])
 
     output_img = torch.tensor(output_img, dtype=torch.float32)
     output_seq = torch.tensor(output_seq, dtype=torch.float32)
-    return output_img, output_seq, output_imgfile
+    return output_img, output_seq, output_imgfile, output_swcfile
 
 
 def draw_lab(lab, lab_image):
@@ -70,12 +74,13 @@ def draw_lab(lab, lab_image):
 
 class GenericDataset(tudata.Dataset):
 
-    def __init__(self, split_file, phase='train', imgshape=(32, 64, 64), seq_node_nums=8):
+    def __init__(self, split_file, phase='train', imgshape=(32, 64, 64), seq_node_nums=8, node_dim=4):
         self.data_list = self.load_data_list(split_file, phase)
         self.imgshape = imgshape
         print(f'Image shape of {phase}: {imgshape}')
         self.phase = phase
         self.seq_node_nums = seq_node_nums
+        self.node_dim = node_dim
         self.augment = InstanceAugmentation(p=0.2, imgshape=imgshape, phase=phase)
 
     @staticmethod
@@ -135,9 +140,9 @@ class GenericDataset(tudata.Dataset):
                     maxlen = len(seq)
                     maxlen_idx = idx
                 for seq_item in seq:
-                    if len(seq_item) < self.seq_node_nums:
+                    if len(seq_item) <= self.seq_node_nums:
                         for i in range(self.seq_node_nums - len(seq_item)):
-                            seq_item.append([0, 0, 0, 0])
+                            seq_item.append(self.node_dim * [PAD])
                     else:
                         len_outofrange = True
                         if idx not in outofrange_list:
@@ -152,10 +157,12 @@ class GenericDataset(tudata.Dataset):
                         maxlen_idx = idx
             # print(f'----------maxlen idx : {maxlen_idx}')
             seq = np.array(seq_list[maxlen_idx])
-            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(seq.astype(np.float32)), imgfile
+            # add eos
+            seq = np.concatenate((seq, np.ones((self.seq_node_nums, self.node_dim)) * EOS), axis=0)
+            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(seq.astype(np.float32)), imgfile, swcfile
         else:
-            lab = np.random.random((5, self.seq_node_nums, 4)) > 0.5
-            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(lab.astype(np.uint8)), imgfile
+            lab = np.random.random((5, self.seq_node_nums, self.node_dim)) > 0.5
+            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(lab.astype(np.uint8)), imgfile, swcfile
 
 
 if __name__ == '__main__':
