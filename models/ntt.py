@@ -18,6 +18,44 @@ def pair3d(t):
     return t if isinstance(t, tuple) else (t, t, t)
 
 
+def posemb_sincos_1d(seq, temperature = 10000, dtype = torch.float32):
+    _, n, dim, device, dtype = *seq.shape, seq.device, seq.dtype
+
+    n = torch.arange(n, device = device)
+    assert (dim % 2) == 0, 'feature dimension must be multiple of 2 for sincos emb'
+    omega = torch.arange(dim // 2, device = device) / (dim // 2 - 1)
+    omega = 1. / (temperature ** omega)
+
+    n = n.flatten()[:, None] * omega[None, :]
+    pe = torch.cat((n.sin(), n.cos()), dim = 1)
+    return pe.type(dtype)
+
+
+def posemb_sincos_3d(patches, temperature = 10000, dtype = torch.float32):
+    _, d, w, h, dim, device, dtype = *patches.shape, patches.device, patches.dtype
+
+    z, y, x = torch.meshgrid(
+        torch.arange(d, device = device),
+        torch.arange(w, device = device),
+        torch.arange(h, device = device),
+        indexing='ij'
+    )
+
+    fourier_dim = dim // 6
+
+    omega = torch.arange(fourier_dim, device = device) / (fourier_dim - 1)
+    omega = 1. / (temperature ** omega)
+
+    z = z.flatten()[:, None] * omega[None, :]
+    y = y.flatten()[:, None] * omega[None, :]
+    x = x.flatten()[:, None] * omega[None, :] 
+
+    pe = torch.cat((x.sin(), x.cos(), y.sin(), y.cos(), z.sin(), z.cos()), dim = 1)
+
+    pe = F.pad(pe, (0, dim - (fourier_dim * 6))) # pad if feature dimension not cleanly divisible by 6
+    return pe.type(dtype)
+
+
 def get_attn_pad_mask(seq_q, seq_k):
     assert seq_q.dim() == 2 and seq_k.dim() == 2
     # b, n
@@ -44,17 +82,17 @@ class ResidualBlock(nn.Module):
         super(ResidualBlock, self).__init__()
         padding = tuple((k - 1) // 2 for k in kernel)
         self.left = nn.Sequential(
-            nn.Conv3d(inchannel, outchannel, kernel_size=kernel, stride=stride, padding=padding, bias=False),
-            nn.BatchNorm3d(outchannel),
+            nn.Conv3d(inchannel, outchannel, kernel_size=kernel, stride=stride, padding=padding, bias=True),
+            nn.InstanceNorm3d(outchannel, affine=True),
             nn.ELU(alpha=0.2, inplace=True),
-            nn.Conv3d(outchannel, outchannel, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm3d(outchannel)
+            nn.Conv3d(outchannel, outchannel, kernel_size=3, stride=1, padding=1, bias=True),
+            nn.InstanceNorm3d(outchannel, affine=True)
         )
         self.shortcut = nn.Sequential()
         if stride != 1 or inchannel != outchannel:
             self.shortcut = nn.Sequential(
-                nn.Conv3d(inchannel, outchannel, kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm3d(outchannel)
+                nn.Conv3d(inchannel, outchannel, kernel_size=1, stride=stride, bias=True),
+                nn.InstanceNorm3d(outchannel, affine=True)
             )
 
     def forward(self, x):
@@ -64,25 +102,14 @@ class ResidualBlock(nn.Module):
         return out
 
 
-class PreNorm(nn.Module):
-    def __init__(self, dim, fn):
-        super().__init__()
-        self.norm = nn.LayerNorm(dim)
-        self.fn = fn
-
-    def forward(self, x, **kwargs):
-        return self.fn(self.norm(x), **kwargs)
-
-
 class FeedForward(nn.Module):
-    def __init__(self, dim, hidden_dim, dropout = 0.):
+    def __init__(self, dim, hidden_dim):
         super().__init__()
         self.net = nn.Sequential(
+            nn.LayerNorm(dim),
             nn.Linear(dim, hidden_dim),
             nn.GELU(),
-            nn.Dropout(dropout),
             nn.Linear(hidden_dim, dim),
-            nn.Dropout(dropout)
         )
 
     def forward(self, x):
@@ -90,34 +117,32 @@ class FeedForward(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads=8, dim_head=64, dropout=0.):
+    def __init__(self, dim, heads=8, dim_head=64):
         super().__init__()
         inner_dim = dim_head *  heads
-        project_out = not (heads == 1 and dim_head == dim)
 
         self.heads = heads
         self.scale = dim_head ** -0.5
+        self.norm = nn.LayerNorm(dim)
 
         self.attend = nn.Softmax(dim=-1)
-        self.dropout = nn.Dropout(dropout)
 
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
         self.to_q = nn.Linear(dim, inner_dim, bias=False)
         self.to_kv = nn.Linear(dim, inner_dim * 2, bias=False)
 
-        self.to_out = nn.Sequential(
-            nn.Linear(inner_dim, dim),
-            nn.Dropout(dropout)
-        ) if project_out else nn.Identity()
+        self.to_out = nn.Linear(inner_dim, dim, bias=False)
 
     def forward(self, x, memory=None, attn_mask=None):
+        x = self.norm(x)
+
         if memory is None:
             qkv = self.to_qkv(x).chunk(3, dim=-1)
             q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), qkv)
         else:
             q = self.to_q(x)
             q = rearrange(q, 'b n (h d) -> b h n d', h=self.heads)
-            kv = self.to_kv(memory)
+            kv = self.to_kv(memory).chunk(2, dim=-1)
             k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), kv)
         #  q, k, v dim:  b, h, n, d
         dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
@@ -127,117 +152,104 @@ class Attention(nn.Module):
             dots.masked_fill_(attn_mask, -1e9)
 
         attn = self.attend(dots)
-        attn = self.dropout(attn)
 
         out = torch.matmul(attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)')
         return self.to_out(out)
 
 
-# class TransformerEncoder(nn.Module):
-#     def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout=0.):
-#         super().__init__()
-#         self.layers = nn.ModuleList([])
-#         for _ in range(depth):
-#             self.layers.append(nn.ModuleList([
-#                 PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)),
-#                 PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
-#             ]))
-#
-#     def forward(self, x):
-#         for attn, ff in self.layers:
-#             x = attn(x) + x
-#             x = ff(x) + x
-#         return x
+class Encoderlayer(nn.Module):
+    def __init__(self, dim, depth, heads, dim_head, mlp_dim):
+        super().__init__()
+        self.layers = nn.ModuleList([])
+        for _ in range(depth):
+            self.layers.append(nn.ModuleList([
+                Attention(dim, heads = heads, dim_head = dim_head),
+                FeedForward(dim, mlp_dim)
+            ]))
+
+    def forward(self, x):
+        for attn, ff in self.layers:
+            x = attn(x) + x
+            x = ff(x) + x
+        return x
+
+
+class Decoderlayer(nn.Module):
+    def __init__(self, dim, depth, heads, dim_head, mlp_dim):
+        super().__init__()
+        self.layers = nn.ModuleList([])
+        for _ in range(depth):
+            self.layers.append(nn.ModuleList([
+                Attention(dim, heads=heads, dim_head=dim_head),
+                Attention(dim, heads=heads, dim_head=dim_head),
+                FeedForward(dim, mlp_dim)
+            ]))
+
+    def forward(self, x, memory, attn_mask):
+        for self_attn, enc_attn, ff in self.layers:
+            x = self_attn(x, attn_mask=attn_mask) + x
+            x = enc_attn(x, memory=memory) + x
+            x = ff(x) + x
+        return x
 
 
 class Encoder(nn.Module):
-    def __init__(self, *, image_size, patch_size, dim, depth, heads, mlp_dim, pool = 'cls', channels=3, dim_head=64, dropout=0., emb_dropout=0.):
+    def __init__(self, *, image_size, patch_size, dim, depth, heads, mlp_dim, channels=3, dim_head=64):
         super().__init__()
-        image_depth, image_height, image_width = pair3d(image_size)
-        patch_depth, patch_height, patch_width = pair3d(patch_size)
+        image_depth, image_width, image_height = pair3d(image_size)
+        patch_depth, patch_width, patch_height = pair3d(patch_size)
 
         assert image_height % patch_height == 0 and image_width % patch_width == 0 and image_depth % patch_depth == 0,\
             'Image dimensions must be divisible by the patch size.'
 
         num_patches = (image_depth // patch_depth) * (image_height // patch_height) * (image_width // patch_width)
         patch_dim = channels * patch_depth * patch_height * patch_width
-        assert pool in {'cls', 'mean'}, 'pool type must be either cls (cls token) or mean (mean pooling)'
 
         self.to_patch_embedding = nn.Sequential(
-            Rearrange('b c (d p1) (h p2) (w p3) -> b (d h w) (p1 p2 p3 c)', p1=patch_depth, p2=patch_height, p3=patch_width),
+            Rearrange('b c (d p1) (w p2) (h p3) -> b d w h (p1 p2 p3 c)', p1=patch_depth, p2=patch_width, p3=patch_height),
+            nn.LayerNorm(patch_dim),
             nn.Linear(patch_dim, dim),
+            nn.LayerNorm(dim)
         )
-
-        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
-        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
-        self.dropout = nn.Dropout(emb_dropout)
-
-        # self.transformer = TransformerEncoder(dim, depth, heads, dim_head, mlp_dim, dropout)
-        self.layers = nn.ModuleList([])
-        for _ in range(depth):
-            self.layers.append(nn.ModuleList([
-                PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)),
-                PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
-            ]))
-
-        self.pool = pool
-        self.to_latent = nn.Identity()
-
-        # self.mlp_head = nn.Sequential(
-        #     nn.LayerNorm(dim),
-        #     nn.Linear(dim, num_classes)
-        # )
+        self.layers = Encoderlayer(dim, depth, heads, dim_head, mlp_dim)
 
     def forward(self, img):
         x = self.to_patch_embedding(img)
-        b, n, _ = x.shape
-
-        cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b=b)
-        x = torch.cat((cls_tokens, x), dim=1)
-        x += self.pos_embedding[:, :(n + 1)]
-        x = self.dropout(x)
-
-        for attn, ff in self.layers:
-            x = attn(x) + x
-            x = ff(x) + x
-
-        x = x.mean(dim=1) if self.pool == 'mean' else x[:, 0]
-
-        x = self.to_latent(x)
+        b, n, *_ = x.shape
+        pe = posemb_sincos_3d(x)
+        x = rearrange(x, 'b ... d -> b (...) d') + pe
+        x = self.layers(x)
+        x = x.mean(dim=1)
         return x
 
 
 class Decoder(nn.Module):
-    def __init__(self, input_dim, dim, depth, heads, dim_head, mlp_dim, dropout=0.):
+    def __init__(self, input_dim, dim, depth, heads, dim_head, mlp_dim):
         super().__init__()
-        self.layers = nn.ModuleList([])
         self.proj = nn.Linear(input_dim, dim)
-        for _ in range(depth):
-            self.layers.append(nn.ModuleList([
-                PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)),
-                PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)),
-                PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
-            ]))
+        self.heads = heads
+        self.layers = Decoderlayer(dim, depth, heads, dim_head, mlp_dim)
 
     def forward(self, x, memory):
         # shape of x:   b, seq_len, seq_item_len, vec_len
+        # x : BOS, item1, item2, ...
         mask_input = x[:, :, 0, -1] > 0
         attn_pad_mask = get_attn_pad_mask(mask_input, mask_input)
         attn_subsequent_mask = get_attn_subsequent_mask(mask_input)
 
         attn_mask = torch.gt((attn_pad_mask + attn_subsequent_mask), 0)
-        if attn_mask:  # attn_mask: [b_size x len_q x len_k]
-            attn_mask = attn_mask.unsqueeze(1).repeat(1, self.n_heads, 1, 1)   # b, h, n, n
+        attn_mask = attn_mask.unsqueeze(1).repeat(1, self.heads, 1, 1)   # b, h, n, n
 
         # -> b, n, d
-        x = rearrange(x, 'b n node_nums node_dims  -> b n (node_nums node_dims)')
+        x = rearrange(x, 'b n ...  -> b n (...)')
+        # b, dim  ->  b, n, dim
+        memory = memory.unsqueeze(1).repeat(1, x.shape[1], 1) 
         # b, n, d
         x = self.proj(x)
-        for self_attn, enc_attn, ff in self.layers:
-            x = self_attn(x, attn_mask=attn_mask) + x
-            x = enc_attn(x, memory=memory) + x
-            x = ff(x) + x
+        pe = posemb_sincos_1d(x)
+        x += pe
+        x = self.layers(x, memory, attn_mask)
         return x
 
 
@@ -250,8 +262,8 @@ class NTT(nn.Module):
 
         # the first layer to process the input image
         self.pre_layer = nn.Sequential(
-            ConvDropoutNormNonlin(in_channels, base_num_filters, norm_op=nn.BatchNorm3d),
-            ConvDropoutNormNonlin(base_num_filters, base_num_filters, norm_op=nn.BatchNorm3d),
+            ConvDropoutNormNonlin(in_channels, base_num_filters),
+            ConvDropoutNormNonlin(base_num_filters, base_num_filters),
         )
 
         in_channels = base_num_filters
@@ -264,8 +276,8 @@ class NTT(nn.Module):
             down_kernel = down_kernel_list[i]
             stride = stride_list[i]
             self.down_d *= stride[0]
-            self.down_h *= stride[1]
-            self.down_w *= stride[2]
+            self.down_w *= stride[1]
+            self.down_h *= stride[2]
             down_filters.append((in_channels, out_channels))
             down = ResidualBlock(in_channels, out_channels, kernel=down_kernel, stride=stride)
             self.downs.append(down)
@@ -273,13 +285,13 @@ class NTT(nn.Module):
             out_channels = out_channels * 2
 
         out_channels = int(out_channels / 2)
-        *_, d, h, w = img_shape
+        *_, d, w, h = img_shape
         d = int(d / self.down_d)
         h = int(h / self.down_h)
         w = int(w / self.down_w)
 
         self.encoder = Encoder(
-            image_size=(d, h, w),
+            image_size=(d, w, h),
             patch_size=patch_size,
             channels=out_channels,
             dim=dim,
@@ -290,7 +302,7 @@ class NTT(nn.Module):
         )
 
         self.decoder = Decoder(
-            input_dim=num_nodes * (node_dims + num_classes),
+            input_dim=num_nodes * (node_dims + 1),
             dim=dim,
             depth=depth,
             heads=heads,
@@ -321,12 +333,13 @@ if __name__ == '__main__':
         configs = json.load(fp)
     print('Initialize model...')
 
-    input = torch.randn(2, 1, 32, 64, 64)
+    img = torch.randn(2, 1, 32, 64, 64)
+    seq = torch.randn(2, 10, 8, 4)
     model = NTT(**configs)
     print(model)
-    outputs = model(input)
+    outputs = model(img, seq)
 
     for output in outputs:
         print('output size: ', output.size())
 
-    summary(model, input_size=(2, 1, 32, 64, 64))
+    summary(model, input_size=[(2, 1, 32, 64, 64), (2, 10, 8, 4)])
