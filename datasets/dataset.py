@@ -21,12 +21,12 @@ sys.setrecursionlimit(30000)
 
 
 PAD = 0
-EOS = 6
+EOS = 5
 
 def collate_fn(batch):
 
-#   batch: [[img, seq, imgfile] for data in batch]
-#   return:  [img] * batch_size, [seq]*batch_szie, [imgfile]*batch_size
+#   batch: [[img, seq, cls, imgfile, swcfile] for data in batch]
+#   return:  [img]*batch_size, [seq]*batch_size, [cls_]*batch_size, [imgfile]*batch_size, [swcfile]*batch_size
 
     dynamical_pad = True
     max_len = 6
@@ -43,6 +43,7 @@ def collate_fn(batch):
     print(len(batch))
     output_seq = []
     output_img = []
+    output_cls = []
     output_imgfile = []
     output_swcfile = []
     for data in batch:
@@ -51,15 +52,22 @@ def collate_fn(batch):
         pad_shape = [max_len-len(seq)] + list(data[1].shape[1:])
         padding = torch.zeros(pad_shape)
         seq = torch.cat((seq, padding), 0).tolist()
-        
+
+        cls_ = data[2][:seq_len]
+        pad_shape = [max_len-len(seq)] + list(data[2].shape[1:])
+        padding = torch.zeros(pad_shape)
+        seq = torch.cat((cls_, padding), 0).tolist()
+
         output_img.append(data[0].tolist())
         output_seq.append(seq)
+        output_cls.append(cls_)
         output_imgfile.append(data[-2])
         output_swcfile.append(data[-1])
 
     output_img = torch.tensor(output_img, dtype=torch.float32)
     output_seq = torch.tensor(output_seq, dtype=torch.float32)
-    return output_img, output_seq, output_imgfile, output_swcfile
+    output_cls = torch.tensor(output_cls, dtype=torch.int32)
+    return output_img, output_seq, output_cls, output_imgfile, output_swcfile
 
 
 def draw_lab(lab, lab_image):
@@ -165,9 +173,15 @@ class GenericDataset(tudata.Dataset):
             seq = np.array(seq_list[maxlen_idx])
             # add eos
             eos = np.zeros((1, self.seq_node_nums, self.node_dim))
-            eos[:, :, -1] = EOS
+            eos[..., -1] = EOS
             seq = np.concatenate((seq, eos), axis=0)
-            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(seq.astype(np.float32)), imgfile, swcfile
+            cls_ = seq[..., -1].copy()
+            #normailize
+            seq.astype(np.float32)
+            for i in range(3):
+                seq[..., i] = (seq[..., i] - 0) / (img.shape[i+1] - 0 + 1e-8)
+            seq[..., -1] = (seq[..., -1] - seq[..., -1].min()) / (seq[..., -1].max() - seq[..., -1].min() + 1e-8)
+            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(seq.astype(np.float32)), torch.from_numpy(cls_.astype(np.int32)), imgfile, swcfile
         else:
             lab = np.random.random((5, self.seq_node_nums, self.node_dim)) > 0.5
             return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(lab.astype(np.uint8)), imgfile, swcfile

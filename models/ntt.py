@@ -254,7 +254,7 @@ class Decoder(nn.Module):
 
 
 class NTT(nn.Module):
-    def __init__(self, in_channels, base_num_filters, num_nodes, node_dims, num_classes, down_kernel_list, stride_list, patch_size,
+    def __init__(self, in_channels, base_num_filters, num_nodes, pos_dims, num_classes, down_kernel_list, stride_list, patch_size,
                  dim, depth, heads, dim_head, mlp_dim, img_shape):
         super(NTT, self).__init__()
         assert len(down_kernel_list) == len(stride_list)
@@ -302,7 +302,7 @@ class NTT(nn.Module):
         )
 
         self.decoder = Decoder(
-            input_dim=num_nodes * (node_dims + 1),
+            input_dim=num_nodes * (pos_dims + 1),
             dim=dim,
             depth=depth,
             heads=heads,
@@ -311,7 +311,7 @@ class NTT(nn.Module):
         )
         # convert layers to nn containers
         self.downs = nn.ModuleList(self.downs)
-        self.proj = nn.Linear(dim, num_nodes * (node_dims + num_classes))
+        self.proj = nn.Linear(dim, num_nodes * (pos_dims + num_classes))
 
     def forward(self, img, x):
         assert img.ndim == 5
