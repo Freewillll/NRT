@@ -46,10 +46,12 @@ parser.add_argument('--cpu', action="store_true",
                     help='Whether use gpu to train model, default True')
 parser.add_argument('--amp', action="store_true",
                     help='Whether to use AMP training, default True')
-parser.add_argument('--lr', '--learning-rate', default=4e-4, type=float,
+parser.add_argument('--lr', '--learning-rate', default=3e-2, type=float,
                     help='initial learning rate')
 parser.add_argument('--momentum', default=0.99, type=float,
                     help='Momentum value for optim')
+parser.add_argument('--weight_decay', default=0, type=float,
+                    help='Weight decay')
 parser.add_argument('--decay_type', choices=['cosine', 'linear'], default='cosine', type=str,
                     help='How to decay the learning rate')
 parser.add_argument('--warmup_steps', default=500, type=str,
@@ -401,7 +403,6 @@ def main():
     crit_ce = nn.CrossEntropyLoss(ignore_index=ntt.PAD).to(args.device)
     crit_box = nn.MSELoss().to(args.device)
     args.imgshape = tuple(map(int, args.image_shape.split(',')))
-    args.lr_steps = tuple(map(int, args.lr_steps.split(',')))
 
     # Print out the arguments information
     ddp_print('Argument are: ')
