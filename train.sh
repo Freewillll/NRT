@@ -16,12 +16,12 @@ python -u -m torch.distributed.launch \
     --node_rank $NODE_RANK \
     train.py \
     --deterministic \
-    --max_epochs 80 \
+    --max_epochs 100 \
     --save_folder ${exp_folder} \
     --amp \
     --step_per_epoch 200 \
     --test_frequency 3 \
-    --image_shape 96,192,192 \
-    --batch_size 4\
+    --image_shape 32,64,64 \
+    --batch_size 16 \
     --data_file '/PBshare/SEU-ALLEN/Users/Gaoyu/neuronSegSR/Task501_neuron/data_splits.pkl' \
     > ${exp_folder}/train.log & 

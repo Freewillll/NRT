@@ -32,11 +32,11 @@ parser = argparse.ArgumentParser(
 parser.add_argument('--data_file', default='/PBshare/SEU-ALLEN/Users/Gaoyu/neuronSegSR/Task501_neuron/data_splits.pkl',
                     type=str, help='dataset split file')
 # training specific
-parser.add_argument('--batch_size', default=2, type=int,
+parser.add_argument('--batch_size', default=16, type=int,
                     help='Batch size for training')
 parser.add_argument('--num_workers', default=4, type=int,
                     help='Number of workers used in dataloading')
-parser.add_argument('--image_shape', default='256,512,512', type=str,
+parser.add_argument('--image_shape', default='32,64,64', type=str,
                     help='Input image shape')
 parser.add_argument('--num_item_nodes', default='8', type=int,
                     help='Number of nodes of a item of the seqences')
@@ -94,7 +94,7 @@ def ddp_print(content):
 
 def draw_seq(img, seq, cls_, pos):
     # img: c, z, y, x
-    # seq: n, 
+    # seq: n, nodes, dim
     # pos: n, 3
     # cls: n
     img = np.repeat(img, 3, axis=0)
