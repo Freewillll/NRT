@@ -96,12 +96,12 @@ def accuracy_withmask(pred_cls, pred_pos, lab_cls, lab_pos, mask, image_shape):
     pred_cls = torch.argmax(pred_cls, dim=1)
     cls_mask = mask.contiguous().transpose(-1, -2)
     pred_cls, lab_cls = torch.masked_select(pred_cls, cls_mask), torch.masked_select(lab_cls, cls_mask)
-    accuracy_cls = (pred_cls == lab_cls).mean()
+    accuracy_cls = (pred_cls == lab_cls).type(torch.float32).mean()
     pos_mask = mask.unsqueeze(3).repeat(1,1,1,3)
     pred_pos, lab_pos = pos_unnormalize(pred_pos, image_shape), pos_unnormalize(lab_pos, image_shape)
     pred_pos, lab_pos = torch.masked_select(pred_pos, pos_mask).view(-1, 3), torch.masked_select(lab_pos, pos_mask).view(-1, 3)
     dist = torch.linalg.norm(pred_pos - lab_pos, dim=-1)
-    accuracy_pos = (dist <= 5).mean()
+    accuracy_pos = (dist <= 5).type(torch.float32).mean()
     return accuracy_cls, accuracy_pos
 
 

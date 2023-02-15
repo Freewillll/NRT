@@ -61,7 +61,7 @@ def collate_fn(batch):
 
     output_img = torch.tensor(output_img, dtype=torch.float32)
     output_seq = torch.tensor(output_seq, dtype=torch.float32)
-    output_cls = torch.tensor(output_cls, dtype=torch.int32)
+    output_cls = torch.tensor(output_cls, dtype=torch.int64)
     return output_img, output_seq, output_cls, output_imgfile, output_swcfile
 
 
@@ -176,11 +176,11 @@ class GenericDataset(tudata.Dataset):
             for i in range(3):
                 seq[..., i] = (seq[..., i] - 0) / (img.shape[i+1] - 0 + 1e-8)
             seq[..., -1] = (seq[..., -1] - seq[..., -1].min()) / (seq[..., -1].max() - seq[..., -1].min() + 1e-8)
-            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(seq.astype(np.float32)), torch.from_numpy(cls_.astype(np.int32)), imgfile, swcfile
+            return torch.from_numpy(img.astype(np.float64)), torch.from_numpy(seq.astype(np.float64)), torch.from_numpy(cls_.astype(np.int64)), imgfile, swcfile
         else:
             lab = np.random.randn((5, self.seq_node_nums, self.node_dim)) > 0.5
             cls_ = np.random.randn((5, self.seq_node_nums)) > 0.5
-            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(lab.astype(np.float32)), troch.from_numpy(cls_.astype(np.int32)), imgfile, swcfile
+            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(lab.astype(np.float32)), troch.from_numpy(cls_.astype(np.int64)), imgfile, swcfile
 
 
 if __name__ == '__main__':

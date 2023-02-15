@@ -149,7 +149,7 @@ class Attention(nn.Module):
         #  dots dim:  b, h, n, n
         if attn_mask is not None:
             assert attn_mask.size() == dots.size()
-            dots.masked_fill_(attn_mask, -1e9)
+            dots.masked_fill_(attn_mask, float("-inf"))
 
         attn = self.attend(dots)
 
@@ -227,13 +227,17 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, input_dim, dim, depth, heads, dim_head, mlp_dim):
         super().__init__()
-        self.proj = nn.Linear(input_dim, dim)
+        self.embedding = nn.Sequential(
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, dim),
+            nn.LayerNorm(dim)
+        )
         self.heads = heads
         self.layers = Decoderlayer(dim, depth, heads, dim_head, mlp_dim)
 
     def forward(self, x, memory):
         # shape of x:   b, seq_len, seq_item_len, vec_len
-        # x : BOS, item1, item2, ...
+        # x : start, item1, item2, ...
         mask_input = x[:, :, 0, -1] > 0
         attn_pad_mask = get_attn_pad_mask(mask_input, mask_input)
         attn_subsequent_mask = get_attn_subsequent_mask(mask_input)
@@ -246,7 +250,7 @@ class Decoder(nn.Module):
         # b, dim  ->  b, n, dim
         memory = memory.unsqueeze(1).repeat(1, x.shape[1], 1) 
         # b, n, d
-        x = self.proj(x)
+        x = self.embedding(x)
         pe = posemb_sincos_1d(x)
         x += pe
         x = self.layers(x, memory, attn_mask)

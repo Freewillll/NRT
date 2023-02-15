@@ -156,17 +156,17 @@ def get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes):
     pred = rearrange(pred, 'b n (nodes dim) -> b n nodes dim', nodes=nodes)
     pred_pos, pred_cls = pred[..., :3], pred[..., 3:]
     # -> b, cls, nodes, n
-    pred_cls = pred_cls.transpose(-1, 1)
+    pred_cls_t = pred_cls.contiguous().transpose(-1, 1)
     trg_pos = trg[..., :3]
     # -> b, nodes, n
-    trg_cls = cls_.transpose(-1, -2)
+    trg_cls = cls_.contiguous().transpose(-1, -2)
     # b, n, nodes
-    mask = cls_[..., -1] != 0
-    accuracy_cls, accuracy_pos = util.accuracy_withmask(pred_cls, pred_pos, trg_cls, trg_pos, mask, img.shape)
+    mask = cls_ != 0
+    accuracy_cls, accuracy_pos = util.accuracy_withmask(pred_cls_t, pred_pos, trg_cls, trg_pos, mask, img.shape)
     # b, n, nodes, 3
     pos_mask = mask.unsqueeze(3).repeat(1, 1, 1, 3)
     pred_pos, trg_pos = torch.masked_select(pred_pos, pos_mask), torch.masked_select(trg_pos, pos_mask)
-    loss_ce, loss_box = crit_ce(pred_cls, trg_cls), crit_box(pred_pos, trg_pos)
+    loss_ce, loss_box = crit_ce(pred_cls_t, trg_cls), crit_box(pred_pos, trg_pos)
     loss = loss_ce + loss_box
     return loss_ce, loss_box, loss, accuracy_cls, accuracy_pos, pred
 
