@@ -280,17 +280,8 @@ def train(model, optimizer, crit_ce, crit_box, imgshape):
                         dynamic_ncols=True,
                         disable=args.local_rank not in [-1, 0])
 
-        for it in range(args.step_per_epoch):
-            try:
-                img, seq, cls_, imgfiles, swcfiles = next(epoch_iterator)
-            except StopIteration:
-                # let all processes sync up before starting with a new epoch of training
-                distrib.barrier()
-                # reset the random seed, to avoid np.random & dataloader problem
-                np.random.seed(args.seed + epoch)
-
-                # train_iter = iter(train_loader)
-                img, seq, cls_, imgfiles, swcfiles = next(epoch_iterator)
+        for step, batch in enumerate(epoch_iterator):
+            img, seq, cls_, imgfiles, swcfiles = batch
 
             img_d = img.to(args.device)
             seq_d = seq.to(args.device)

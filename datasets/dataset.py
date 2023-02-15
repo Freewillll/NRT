@@ -35,28 +35,23 @@ def collate_fn(batch):
 
     # find the max len in each batch
     if dynamical_pad:
-        seq_len = max(lens)
-    else:
-        # fixed length padding
-        seq_len = max_len
+        max_len = max(lens)
     # print("collate_fn seq_len", seq_len)
-    print(len(batch))
     output_seq = []
     output_img = []
     output_cls = []
     output_imgfile = []
     output_swcfile = []
     for data in batch:
-        seq = data[1][:seq_len]
-        # pad shape  (pad_len, item_len, vec_len)
+        seq = data[1][:max_len]
         pad_shape = [max_len-len(seq)] + list(data[1].shape[1:])
         padding = torch.zeros(pad_shape)
         seq = torch.cat((seq, padding), 0).tolist()
 
-        cls_ = data[2][:seq_len]
-        pad_shape = [max_len-len(seq)] + list(data[2].shape[1:])
+        cls_ = data[2][:max_len]
+        pad_shape = [max_len-len(cls_)] + list(data[2].shape[1:])
         padding = torch.zeros(pad_shape)
-        seq = torch.cat((cls_, padding), 0).tolist()
+        cls_= torch.cat((cls_, padding), 0).tolist()
 
         output_img.append(data[0].tolist())
         output_seq.append(seq)
@@ -113,8 +108,8 @@ class GenericDataset(tudata.Dataset):
             raise ValueError
 
     def __getitem__(self, index):
-        img, gt, imgfile = self.pull_item(index)
-        return img, gt, imgfile
+        img, seq, cls_, imgfile, swcfile = self.pull_item(index)
+        return img, seq, cls_, imgfile, swcfile
 
     def __len__(self):
         return len(self.data_list)
@@ -170,7 +165,7 @@ class GenericDataset(tudata.Dataset):
                     if idx not in outofrange_list:
                         maxlen_idx = idx
             # print(f'----------maxlen idx : {maxlen_idx}')
-            seq = np.array(seq_list[maxlen_idx])
+            seq = np.asarray(seq_list[maxlen_idx])
             # add eos
             eos = np.zeros((1, self.seq_node_nums, self.node_dim))
             eos[..., -1] = EOS
@@ -183,8 +178,9 @@ class GenericDataset(tudata.Dataset):
             seq[..., -1] = (seq[..., -1] - seq[..., -1].min()) / (seq[..., -1].max() - seq[..., -1].min() + 1e-8)
             return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(seq.astype(np.float32)), torch.from_numpy(cls_.astype(np.int32)), imgfile, swcfile
         else:
-            lab = np.random.random((5, self.seq_node_nums, self.node_dim)) > 0.5
-            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(lab.astype(np.uint8)), imgfile, swcfile
+            lab = np.random.randn((5, self.seq_node_nums, self.node_dim)) > 0.5
+            cls_ = np.random.randn((5, self.seq_node_nums)) > 0.5
+            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(lab.astype(np.float32)), troch.from_numpy(cls_.astype(np.int32)), imgfile, swcfile
 
 
 if __name__ == '__main__':

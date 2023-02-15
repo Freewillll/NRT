@@ -25,5 +25,6 @@ python -u -m torch.distributed.launch \
     --test_frequency 3 \
     --image_shape 32,64,64 \
     --batch_size 16 \
+    --num_item_nodes 10 \
     --data_file '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task002_ntt_256/data_splits.pkl' \
     > ${exp_folder}/train.log & 
