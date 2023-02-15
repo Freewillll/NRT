@@ -56,6 +56,8 @@ parser.add_argument('--decay_type', choices=['cosine', 'linear'], default='cosin
                     help='How to decay the learning rate')
 parser.add_argument('--warmup_steps', default=500, type=str,
                     help='Step of training to perform learning rate warmup for')
+parser.add_argument('--max_grad_norm', default=1.0, type=float,
+                    help='Max gradient norm.')
 parser.add_argument('--max_epochs', default=200, type=int,
                     help='maximal number of epochs')
 parser.add_argument('--step_per_epoch', default=200, type=int,
@@ -162,13 +164,13 @@ def get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes):
     trg_cls = cls_.contiguous().transpose(-1, -2)
     # b, n, nodes
     mask = cls_ != 0
-    accuracy_cls, accuracy_pos = util.accuracy_withmask(pred_cls_t, pred_pos, trg_cls, trg_pos, mask, img.shape)
+    accuracy_cls, accuracy_pos = util.accuracy_withmask(pred_cls_t.clone(), pred_pos.clone(), trg_cls.clone(), trg_pos.clone(), mask.clone(), img.shape)
     # b, n, nodes, 3
     pos_mask = mask.unsqueeze(3).repeat(1, 1, 1, 3)
-    pred_pos, trg_pos = torch.masked_select(pred_pos, pos_mask), torch.masked_select(trg_pos, pos_mask)
     loss_ce, loss_box = crit_ce(pred_cls_t, trg_cls), crit_box(pred_pos, trg_pos)
-    loss = loss_ce + loss_box
-    return loss_ce, loss_box, loss, accuracy_cls, accuracy_pos, pred
+    loss_mask_box = (loss_box * pos_mask).sum() / pos_mask.sum()
+    loss = loss_ce + loss_mask_box
+    return loss_ce, loss_mask_box, loss, accuracy_cls, accuracy_pos, pred
 
 
 def get_forward_eval(img, seq, cls_, crit_ce, crit_box, model, nodes):
@@ -275,8 +277,8 @@ def train(model, optimizer, crit_ce, crit_box, imgshape):
 
         epoch_iterator = tqdm(train_loader,
                         desc=f'Epoch {epoch + 1}/{args.max_epochs}',
-                        postfix=dict,
                         total=args.step_per_epoch,
+                        postfix=dict,
                         dynamic_ncols=True,
                         disable=args.local_rank not in [-1, 0])
 
@@ -294,27 +296,27 @@ def train(model, optimizer, crit_ce, crit_box, imgshape):
                     del img_d
                 grad_scaler.scale(loss).backward()
                 grad_scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm(model.parameters(), 12)
-                scheduler.step()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 grad_scaler.step(optimizer)
                 grad_scaler.update()
+                scheduler.step()
             else:
                 loss_ce, loss_box, loss, accuracy_cls, accuracy_pos = get_forward(img_d, seq_d, cls_d, crit_ce, crit_box, model, args.num_item_nodes)
                 del img_d
                 loss.backward()
-                torch.nn.utils.clip_grad_norm(model.parameters(), 12)
-                scheduler.step()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 optimizer.step()
+                scheduler.step()
 
             avg_loss_ce += loss_ce
             avg_loss_box += loss_box
 
             # train statistics for bebug afterward
-            if it % args.print_frequency == 0:
+            if step % args.print_frequency == 0:
                 ddp_print(
-                    f'[{epoch}/{it}] loss_ce={loss_ce:.5f}, loss_box={loss_box:.5f}, accuracy_cls={accuracy_cls:.3f}, accuracy_pos={accuracy_pos:.3f}, time: {time.time() - t0:.4f}s')
+                    f'[{epoch}/{step}] loss_ce={loss_ce:.5f}, loss_box={loss_box:.5f}, accuracy_cls={accuracy_cls:.3f}, accuracy_pos={accuracy_pos:.3f}, time: {time.time() - t0:.4f}s')
 
-            epoch_iterator.set_description({'loss_ce': loss_ce, 'loss_box': loss_box, 'accuracy_cls': accuracy_cls, 'accuracy_pos': accuracy_pos})
+            epoch_iterator.set_postfix({'loss_ce': loss_ce, 'loss_box': loss_box, 'accuracy_cls': accuracy_cls, 'accuracy_pos': accuracy_pos})
 
         avg_loss_ce /= args.step_per_epoch
         avg_loss_box /= args.step_per_epoch
@@ -392,7 +394,7 @@ def main():
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=args.weight_decay, amsgrad=True)
 
     crit_ce = nn.CrossEntropyLoss(ignore_index=ntt.PAD).to(args.device)
-    crit_box = nn.MSELoss().to(args.device)
+    crit_box = nn.MSELoss(reduction='none').to(args.device)
     args.imgshape = tuple(map(int, args.image_shape.split(',')))
 
     # Print out the arguments information
