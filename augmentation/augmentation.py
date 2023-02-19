@@ -27,6 +27,8 @@ parent = os.path.dirname(current)
 sys.path.append(parent)
 
 from utils import image_util
+from swc_handler import write_swc
+from datasets.swc_processing import trim_out_of_box
 
 
 def has_fg(tree, imgshape):
@@ -37,7 +39,7 @@ def has_fg(tree, imgshape):
             and y > 0 and y < imgshape[1] - 1 \
             and z > 0 and z < imgshape[0] - 1:
             fg_nums += 1
-            if fg_nums >= 10:
+            if fg_nums >= 5:
                 return True
     return False
 
@@ -51,7 +53,7 @@ def get_random_shape(img, scale_range, per_axis):
         scales = np.random.uniform(*scale_range, size=len(shape))
     else:
         scales = np.array([np.random.uniform(*scale_range)] * len(shape))
-    target_shape = np.round(shape * scales).astype(np.int)
+    target_shape = np.round(shape * scales).astype(int)
     return shape, target_shape
 
 
@@ -79,6 +81,9 @@ def image_scale_4D(img, tree, shape, target_shape, mode, anti_aliasing):
 
 
 def random_crop_image_4D(img, tree, target_shape):
+    
+    # print(f'img_shape: {img.shape} target_shape: {target_shape}')
+    
     new_img = np.zeros((img.shape[0], *target_shape), dtype=img.dtype)
     sz = None
     sy = None
@@ -90,14 +95,12 @@ def random_crop_image_4D(img, tree, target_shape):
             new_img[c] = img[c][sz:sz + target_shape[0], sy:sy + target_shape[1], sx:sx + target_shape[2]]
 
     # processing the gt
-
+    # print(f'sz, sy, sx : {sz}, {sy}, {sx}')
     if tree is not None:
         new_tree = []
         for leaf in tree:
             idx, type_, x, y, z, r, p = leaf
             x = x - sx
-            # Since the y-coordinate in swc file is mirrored by crop
-            # center, the coordinate change should take care!!!
             y = y - sy
             z = z - sz
             new_tree.append((idx, type_, x, y, z, r, p))
@@ -369,17 +372,17 @@ class RandomMirror(AbstractTransform):
                 if axis == 1:
                     for leaf in tree:
                         idx, type_, x, y, z, r, p = leaf
-                        z = shape_axis - z
+                        z = shape_axis - 1 - z
                         new_tree.append((idx, type_, x, y, z, r, p))
                 elif axis == 2:
                     for leaf in tree:
                         idx, type_, x, y, z, r, p = leaf
-                        y = shape_axis - y
+                        y = shape_axis - 1 - y
                         new_tree.append((idx, type_, x, y, z, r, p))
                 else:
                     for leaf in tree:
                         idx, type_, x, y, z, r, p = leaf
-                        x = shape_axis - x
+                        x = shape_axis - 1 - x
                         new_tree.append((idx, type_, x, y, z, r, p))
                 tree = new_tree
 
@@ -418,8 +421,7 @@ class ScaleToFixedSize(AbstractTransform):
     def __call__(self, img, tree=None):
         if np.random.random() < self.p:
             shape = np.array(img[0].shape)
-            img, tree = image_scale_4D(img, tree, shape, self.target_shape, self.mode,
-                                                      self.anti_aliasing)
+            img, tree = image_scale_4D(img, tree, shape, self.target_shape, self.mode, self.anti_aliasing)
 
         return img, tree
 
@@ -437,22 +439,37 @@ class RandomCrop(AbstractTransform):
             return img, tree
 
         if self.crop_range[0] == self.crop_range[1]:
+            # print(f'val img shpae: {img.shape}')
             target_shape = self.imgshape
-            img, tree = random_crop_image_4D(img, tree, target_shape)
-            return img, tree
+            if self.force_fg_sampling:
+                num_trail = 0
+                while num_trail < 100:
+                    new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
+                    crop_tree = trim_out_of_box(new_tree, target_shape)
+                    if len(crop_tree) > 10:
+                        break
+                    num_trail += 1
+                else:
+                    print("No foreground found after random crops!")
+            else:
+                new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
+                
+            return new_img, new_tree
+        
         else:
             if self.force_fg_sampling:
                 num_trail = 0
-                while num_trail < 10:
+                while num_trail < 200:
                     shape, target_shape = get_random_shape(self.imgshape, self.crop_range, self.per_axis)
-                    new_img, new_tree= random_crop_image_4D(img, tree, target_shape)
+                    new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
                     # check foreground existence
-                    if has_fg(new_tree, self.imgshape):
+                    crop_tree = trim_out_of_box(new_tree, target_shape)
+                    if len(crop_tree) > 20:
                         break
-
                     num_trail += 1
                 else:
-                    print("No foreground found after ten random crops!")
+                    print("No foreground found after random crops!")
+            
             else:
                 shape, target_shape = get_random_shape(self.imgshape, self.crop_range, self.per_axis)
                 new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
@@ -570,12 +587,9 @@ class RandomShift(AbstractTransform):
 class InstanceAugmentation(object):
     def __init__(self, p=0.2, imgshape=(48, 96, 96), phase='train', divid=2 ** 5):
         if phase == 'train':
-            pre_crop_size = []
-            pre_crop_ratio = 1.5
-
             self.augment = Compose([
                 ConvertToFloat(),
-                RandomCrop(1.0, imgshape, crop_range=(0.85, 1.0), force_fg_sampling=True),
+                RandomCrop(1.0, imgshape, crop_range=(1.0, 1.2), force_fg_sampling=True),
                 RandomGammaTransformDualModes(p=p, gamma_range=(0.7, 1.4), per_channel=False, retain_stats=False),
                 RandomGaussianNoise(p=p),
                 # RandomSaturation(p=p),
@@ -588,7 +602,7 @@ class InstanceAugmentation(object):
         elif phase == 'val':
             self.augment = Compose([
                 ConvertToFloat(),
-                RandomCrop(1.0, imgshape, crop_range=(1.0, 1.0)),
+                RandomCrop(1.0, imgshape, crop_range=(1.0, 1.0), force_fg_sampling=True),
             ])
         elif phase == 'test' or phase == 'par':
             self.augment = Compose([

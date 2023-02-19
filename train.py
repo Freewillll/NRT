@@ -8,6 +8,7 @@ import SimpleITK as sitk
 from einops import rearrange
 from tqdm import tqdm
 from datetime import timedelta
+import skimage.morphology as morphology
 
 import torch
 import torch.nn as nn
@@ -17,6 +18,7 @@ import torch.nn.functional as F
 import torch.distributed as distrib
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import RandomSampler
 
 from models import ntt
 from utils import util
@@ -40,13 +42,15 @@ parser.add_argument('--image_shape', default='32,64,64', type=str,
                     help='Input image shape')
 parser.add_argument('--num_item_nodes', default='8', type=int,
                     help='Number of nodes of a item of the seqences')
-parser.add_argument('--node_dim', default='4', type=int,
+parser.add_argument('--node_dim', default=4, type=int,
                     help='The dim of nodes in the sequences')
 parser.add_argument('--cpu', action="store_true",
                     help='Whether use gpu to train model, default True')
+parser.add_argument('--loss_weight', default='1,5',
+                    help='The weight of loss_ce and loss_box')
 parser.add_argument('--amp', action="store_true",
                     help='Whether to use AMP training, default True')
-parser.add_argument('--lr', '--learning-rate', default=3e-2, type=float,
+parser.add_argument('--lr', '--learning-rate', default=1e-4, type=float,
                     help='initial learning rate')
 parser.add_argument('--momentum', default=0.99, type=float,
                     help='Momentum value for optim')
@@ -102,19 +106,23 @@ def draw_seq(img, seq, cls_, pos):
     # pos: n, 3
     # cls: n
     img = np.repeat(img, 3, axis=0)
+    img[0, :, :, :] = 0
+    img[2, :, :, :] = 0
     # keep the position of nodes in the range of imgshape
-    start = np.clip(seq.numpy()[0,0,:3], [0,0,0], [i -1 for i in img.shape[1:]]).astype(int)
-    nodes = np.clip(pos.numpy(), [0,0,0], [i -1 for i in img.shape[1:]]).astype(int)
+    # print(seq.shape, pos.shape, cls_.shape, img.shape)
+    
+    start = np.clip(util.pos_unnormalize(seq.cpu().numpy()[0,0,:3], img.shape[1:]), [0,0,0], [i -1 for i in img.shape[1:]]).astype(int)
+    nodes = np.clip(util.pos_unnormalize(pos.cpu().numpy(), img.shape[1:]), [0,0,0], [i -1 for i in img.shape[1:]]).astype(int)
     # draw nodes
-    img[1, start[0], start[1], start[2]] = 255  # start point
+    img[:, start[0], start[1], start[2]] = 255  # start point white
     for idx, node in enumerate(nodes):
-        if cls_[idx] == 1: # root green
-            img[1, node[0], node[1], node[2]] = 255
-        elif cls_[idx] == 2: # branching point red
+        if cls_[idx] == 1: # root white
+            img[:, node[0], node[1], node[2]] = 255
+        elif cls_[idx] == 2: # branching point yellow
             img[0, node[0], node[1], node[2]] = 255
-        elif cls_[idx] == 3: # tip yellow
-            img[:2, node[0], node[1], node[2]] = 255
-        elif cls_[idx] == 4:
+        elif cls_[idx] == 3: # tip blue
+            img[2, node[0], node[1], node[2]] = 255
+        elif cls_[idx] == 4: #boundary blue
             img[2, node[0], node[1], node[2]] = 255
     selem = np.ones((1,2,3,3), dtype=np.uint8)
     img = morphology.dilation(img, selem)
@@ -127,15 +135,17 @@ def save_image_in_training(imgfiles, img, seq, cls_, pred, epoch, phase, idx):
     imgfile = imgfiles[idx]
     prefix = get_file_prefix(imgfile)
     with torch.no_grad():
-        img = (unnormalize_normal(img[idx].numpy())[0]).astype(np.uint8)
+        img = (unnormalize_normal(img[idx].numpy())).astype(np.uint8)
         # -> n, nodes, dim
-        trg, cls_, pred = seq[0, 1:], cls_[0, 1:], pred[0]
+        trg, cls_, pred = seq[idx, 1:], cls_[idx, 1:], pred[idx]
         # add start points
         pred_cls = torch.argmax(pred[..., 3:], dim=1)
         pred = pred[torch.where(pred_cls > 0)]  # n, dim
+        pred_cls = pred_cls[torch.where(pred_cls > 0)]
         trg = trg[torch.where(cls_ > 0)]
-        img_pred = draw_seq(img, seq[0], pred_cls, pred[..., :3])
-        img_lab = draw_seq(img, seq[0], cls_, trg[..., :3])
+        cls_ = cls_[torch.where(cls_ > 0)]
+        img_pred = draw_seq(img, seq[idx], pred_cls, pred[..., :3])
+        img_lab = draw_seq(img, seq[idx], cls_, trg[..., :3])
 
         if phase == 'train':
             out_lab_file = f'debug_epoch{epoch}_{prefix}_{phase}_lab.v3draw'
@@ -148,7 +158,7 @@ def save_image_in_training(imgfiles, img, seq, cls_, pred, epoch, phase, idx):
         save_image(os.path.join(args.save_folder, out_pred_file), img_pred)
 
 
-def get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes):
+def get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes, loss_weight):
     # trg: b, n, nodes, dim (add EOS)
     # cls: b, n, nodes
     src, trg = seq[:, :-1, ...],  seq[:, 1:, ...]
@@ -169,28 +179,29 @@ def get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes):
     pos_mask = mask.unsqueeze(3).repeat(1, 1, 1, 3)
     loss_ce, loss_box = crit_ce(pred_cls_t, trg_cls), crit_box(pred_pos, trg_pos)
     loss_mask_box = (loss_box * pos_mask).sum() / pos_mask.sum()
-    loss = loss_ce + loss_mask_box
+    loss = loss_weight[0] * loss_ce + loss_weight[1] * loss_mask_box
     return loss_ce, loss_mask_box, loss, accuracy_cls, accuracy_pos, pred
 
 
-def get_forward_eval(img, seq, cls_, crit_ce, crit_box, model, nodes):
+def get_forward_eval(img, seq, cls_, crit_ce, crit_box, model, nodes, loss_weight):
     if args.amp:
         with autocast():
             with torch.no_grad():
-                loss_ce, loss_box, loss = get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes)
+                loss_ce, loss_box, loss, accuracy_cls, accuracy_pos, pred = get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes, loss_weight)
     else:
         with torch.no_grad():
-            loss_ce, loss_box, loss = get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes)
-    return loss_ce, loss_box, loss
+            loss_ce, loss_box, loss, accuracy_cls, accuracy_pos, pred = get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes, loss_weight)
+    return loss_ce, loss_box, loss, accuracy_cls, accuracy_pos, pred
 
 
-def validate(model, val_loader, crit_ce, crit_box, epoch, debug=True, num_image_save=10, phase='val'):
+def validate(model, val_loader, crit_ce, crit_box, loss_weight, epoch, debug=True, num_image_save=10, phase='val'):
     model.eval()
     num_saved = 0
     if num_image_save == -1:
         num_image_save = 9999
 
     losses = []
+    accuracies = []
     processed = -1
     for img, seq, cls_, imgfiles, swcfiles in val_loader:
         processed += 1
@@ -199,28 +210,29 @@ def validate(model, val_loader, crit_ce, crit_box, epoch, debug=True, num_image_
         seq_d = seq.to(args.device)
         cls_d = cls_.to(args.device)
         if phase == 'val':
-            loss_ce, loss_box, loss = get_forward_eval(img_d, seq_d, cls_d, crit_ce, crit_box, model, args.num_item_nodes)
+            loss_ce, loss_box, loss, accuracy_cls, accuracy_pos, pred = get_forward_eval(img_d, seq_d, cls_d, crit_ce, crit_box, model, args.num_item_nodes, loss_weight)
 
         else:
             raise ValueError
 
         del img_d
-        del lab_d
+        del seq_d
+        del cls_d
 
-        losses.append([loss_ce, loss_box, loss.item()])
+        losses.append([loss_ce.item(), loss_box.item(), loss.item()])
+        accuracies.append([accuracy_cls.item(), accuracy_pos.item()])
 
         if debug:
             for debug_idx in range(img.size(0)):
                 num_saved += 1
                 if num_saved > num_image_save:
                     break
-                save_image_in_training(imgfiles, img, lab, logits, epoch, phase, debug_idx)
+                save_image_in_training(imgfiles, img, seq, cls_, pred, epoch, phase, debug_idx)
 
-    losses = torch.from_numpy(np.array(losses)).to(args.device)
-    distrib.all_reduce(losses, op=distrib.ReduceOp.SUM)
-    losses = losses.mean(dim=0) / distrib.get_world_size()
+    losses = torch.from_numpy(np.array(losses)).to(args.device).mean(dim=0)
+    accuracies = torch.from_numpy(np.array(accuracies)).to(args.device).mean(dim=0)
 
-    return losses
+    return losses[0], losses[1], losses[2], accuracies[0], accuracies[1]
 
 
 def load_dataset(phase, imgshape):
@@ -228,9 +240,9 @@ def load_dataset(phase, imgshape):
     ddp_print(f'Number of {phase} samples: {len(dset)}')
     # distributedSampler
     if phase == 'train':
-        sampler = DistributedSampler(dset, shuffle=True)
+        sampler = RandomSampler(dset) if args.local_rank == -1 else DistributedSampler(dset, shuffle=True)
     else:
-        sampler = DistributedSampler(dset, shuffle=False)
+        sampler = RandomSampler(dset) if args.local_rank == -1 else DistributedSampler(dset, shuffle=False)
 
     loader = tudata.DataLoader(dset, args.batch_size,
                                num_workers=args.num_workers,
@@ -243,18 +255,19 @@ def load_dataset(phase, imgshape):
     return loader, dset_iter
 
 
-def evaluate(model, optimizer, crit_ce, crit_box, imgshape, phase='test'):
+def evaluate(model, optimizer, crit_ce, crit_box, imgshape, phase, loss_weight):
     val_loader, val_iter = load_dataset(phase, imgshape)
     args.curr_epoch = 0
-    loss_ce, loss_dice, loss = validate(model, val_loader, crit_ce, crit_box, epoch=0, debug=True, num_image_save=-1,
+    loss_ce, loss_dice, loss = validate(model, val_loader, crit_ce, crit_box, loss_weight, epoch=0, debug=True, num_image_save=-1,
                                         phase=phase)
     ddp_print(f'Average loss_ce and loss_dice: {loss_ce:.5f} {loss_dice:.5f}')
 
 
-def train(model, optimizer, crit_ce, crit_box, imgshape):
+def train(model, optimizer, crit_ce, crit_box, imgshape, loss_weight):
     # dataset preparing
     train_loader, train_iter = load_dataset('train', imgshape)
     val_loader, val_iter = load_dataset('val', imgshape)
+    args.step_per_epoch = len(train_loader) if len(train_loader) < args.step_per_epoch else args.step_per_epoch
     t_total = args.max_epochs * args.step_per_epoch
     if args.decay_type == "cosine":
         scheduler = util.WarmupCosineSchedule(optimizer, warmup_steps=args.warmup_steps, t_total=t_total)
@@ -292,7 +305,7 @@ def train(model, optimizer, crit_ce, crit_box, imgshape):
             optimizer.zero_grad()
             if args.amp:
                 with autocast():
-                    loss_ce, loss_box, loss, accuracy_cls, accuracy_pos, pred = get_forward(img_d, seq_d, cls_d, crit_ce, crit_box, model, args.num_item_nodes)
+                    loss_ce, loss_box, loss, accuracy_cls, accuracy_pos, pred = get_forward(img_d, seq_d, cls_d, crit_ce, crit_box, model, args.num_item_nodes, loss_weight)
                     del img_d
                 grad_scaler.scale(loss).backward()
                 grad_scaler.unscale_(optimizer)
@@ -301,7 +314,7 @@ def train(model, optimizer, crit_ce, crit_box, imgshape):
                 grad_scaler.update()
                 scheduler.step()
             else:
-                loss_ce, loss_box, loss, accuracy_cls, accuracy_pos = get_forward(img_d, seq_d, cls_d, crit_ce, crit_box, model, args.num_item_nodes)
+                loss_ce, loss_box, loss, accuracy_cls, accuracy_pos = get_forward(img_d, seq_d, cls_d, crit_ce, crit_box, model, args.num_item_nodes, loss_weight)
                 del img_d
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
@@ -312,11 +325,11 @@ def train(model, optimizer, crit_ce, crit_box, imgshape):
             avg_loss_box += loss_box
 
             # train statistics for bebug afterward
-            if step % args.print_frequency == 0:
-                ddp_print(
-                    f'[{epoch}/{step}] loss_ce={loss_ce:.5f}, loss_box={loss_box:.5f}, accuracy_cls={accuracy_cls:.3f}, accuracy_pos={accuracy_pos:.3f}, time: {time.time() - t0:.4f}s')
+            # if step % args.print_frequency == 0:
+            #     ddp_print(
+            #         f'[{epoch}/{step}] loss_ce={loss_ce:.5f}, loss_box={loss_box:.5f}, accuracy_cls={accuracy_cls:.3f}, accuracy_pos={accuracy_pos:.3f}, time: {time.time() - t0:.4f}s')
 
-            epoch_iterator.set_postfix({'loss_ce': loss_ce, 'loss_box': loss_box, 'accuracy_cls': accuracy_cls, 'accuracy_pos': accuracy_pos})
+            epoch_iterator.set_postfix({'loss_ce': loss_ce.item(), 'loss_box': loss_box.item(), 'accuracy_cls': accuracy_cls.item(), 'accuracy_pos': accuracy_pos.item()})
 
         avg_loss_ce /= args.step_per_epoch
         avg_loss_box /= args.step_per_epoch
@@ -324,7 +337,7 @@ def train(model, optimizer, crit_ce, crit_box, imgshape):
         # do validation
         if epoch % args.test_frequency == 0:
             ddp_print('Evaluate on val set')
-            val_loss_ce, val_loss_box, val_loss, val_accuracy_cls, val_accuracy_pos = validate(model, val_loader, crit_ce, crit_box, epoch, debug=debug,
+            val_loss_ce, val_loss_box, val_loss, val_accuracy_cls, val_accuracy_pos = validate(model, val_loader, crit_ce, crit_box, loss_weight, epoch, debug=debug,
                                                             phase='val')
             model.train()  # back to train phase
             ddp_print(f'[Val{epoch}] average ce loss, box loss and the sum are {val_loss_ce:.5f}, {val_loss_box:.5f}, {val_loss:.5f},\
@@ -341,7 +354,7 @@ def train(model, optimizer, crit_ce, crit_box, imgshape):
 
 def main():
     # keep track of master, useful for IO
-    args.is_master = args.local_rank == 0
+    args.is_master = args.local_rank in [0, -1]
 
     if args.local_rank == -1:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -388,7 +401,6 @@ def main():
 
     # optimizer & loss
     if args.checkpoint:
-        args.lr /= 5
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=args.weight_decay, amsgrad=True)
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=args.weight_decay, amsgrad=True)
@@ -396,15 +408,18 @@ def main():
     crit_ce = nn.CrossEntropyLoss(ignore_index=ntt.PAD).to(args.device)
     crit_box = nn.MSELoss(reduction='none').to(args.device)
     args.imgshape = tuple(map(int, args.image_shape.split(',')))
+    loss_weight = list(map(float, args.loss_weight.split(',')))
+    sum_weights = sum(loss_weight)
+    loss_weight = [w / sum_weights for w in loss_weight]
 
     # Print out the arguments information
     ddp_print('Argument are: ')
     ddp_print(f'   {args}')
 
     if args.evaluation:
-        evaluate(model, optimizer, crit_ce, crit_box, args.imgshape, args.phase)
+        evaluate(model, optimizer, crit_ce, crit_box, args.imgshape, args.phase, loss_weight)
     else:
-        train(model, optimizer, crit_ce, crit_box, args.imgshape)
+        train(model, optimizer, crit_ce, crit_box, args.imgshape, loss_weight)
 
 
 if __name__ == '__main__':

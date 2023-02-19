@@ -12,7 +12,7 @@ parent = os.path.dirname(current)
 sys.path.append(parent)
 
 
-from swc_handler import parse_swc
+from swc_handler import parse_swc, write_swc
 from augmentation.augmentation import InstanceAugmentation
 from datasets.swc_processing import trim_out_of_box, swc_to_forest
 
@@ -132,11 +132,14 @@ class GenericDataset(tudata.Dataset):
         img, tree = self.augment(img, tree)
 
         if tree is not None and self.phase != 'test':
-            tree = trim_out_of_box(tree, img[0].shape, True)
-            seq_list = swc_to_forest(tree)
-
-            # print(seq_list)
-            # print(f'---------the len of seq list : {len(seq_list)}')
+            tree_crop = trim_out_of_box(tree, img[0].shape, True)
+            seq_list = swc_to_forest(tree_crop)
+            
+            # if len(seq_list) == 0:
+            #     os.makedirs('./debug', exist_ok=True)
+            #     write_swc(tree, os.path.join('debug', os.path.split(swcfile)[-1]))
+            #     write_swc(tree_crop, os.path.join('debug', f'crop_{os.path.split(swcfile)[-1]}'))
+            #     print(imgfile, swcfile)
 
             # pad the seq_item 
             # find the seq has max len
@@ -164,7 +167,7 @@ class GenericDataset(tudata.Dataset):
                 for idx in range(0, len(seq_list)):
                     if idx not in outofrange_list:
                         maxlen_idx = idx
-            # print(f'----------maxlen idx : {maxlen_idx}')
+            # print(f'----------maxlen idx : {maxlen_idx}---------len: {len(seq_list)}')
             seq = np.asarray(seq_list[maxlen_idx])
             # add eos
             eos = np.zeros((1, self.seq_node_nums, self.node_dim))
@@ -176,7 +179,7 @@ class GenericDataset(tudata.Dataset):
             for i in range(3):
                 seq[..., i] = (seq[..., i] - 0) / (img.shape[i+1] - 0 + 1e-8)
             seq[..., -1] = (seq[..., -1] - seq[..., -1].min()) / (seq[..., -1].max() - seq[..., -1].min() + 1e-8)
-            return torch.from_numpy(img.astype(np.float64)), torch.from_numpy(seq.astype(np.float64)), torch.from_numpy(cls_.astype(np.int64)), imgfile, swcfile
+            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(seq.astype(np.float32)), torch.from_numpy(cls_.astype(np.int64)), imgfile, swcfile
         else:
             lab = np.random.randn((5, self.seq_node_nums, self.node_dim)) > 0.5
             cls_ = np.random.randn((5, self.seq_node_nums)) > 0.5

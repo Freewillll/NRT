@@ -127,9 +127,9 @@ class Attention(nn.Module):
 
         self.attend = nn.Softmax(dim=-1)
 
-        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
         self.to_q = nn.Linear(dim, inner_dim, bias=False)
-        self.to_kv = nn.Linear(dim, inner_dim * 2, bias=False)
+        self.to_k = nn.Linear(dim, inner_dim, bias=False)
+        self.to_v = nn.Linear(dim, inner_dim, bias=False)
 
         self.to_out = nn.Linear(inner_dim, dim, bias=False)
 
@@ -137,13 +137,16 @@ class Attention(nn.Module):
         x = self.norm(x)
 
         if memory is None:
-            qkv = self.to_qkv(x).chunk(3, dim=-1)
-            q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), qkv)
+            q = self.to_q(x)
+            k = self.to_k(x)
+            v = self.to_v(x)
+            q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), (q, k, v))
         else:
             q = self.to_q(x)
-            q = rearrange(q, 'b n (h d) -> b h n d', h=self.heads)
-            kv = self.to_kv(memory).chunk(2, dim=-1)
-            k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), kv)
+            k = self.to_k(memory)
+            v = self.to_v(memory)
+            q, k, v = map(lambda t: rearrange(q, 'b n (h d) -> b h n d', h=self.heads), (q, k, v))
+
         #  q, k, v dim:  b, h, n, d
         dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
         #  dots dim:  b, h, n, n
@@ -216,7 +219,6 @@ class Encoder(nn.Module):
 
     def forward(self, img):
         x = self.to_patch_embedding(img)
-        b, n, *_ = x.shape
         pe = posemb_sincos_3d(x)
         x = rearrange(x, 'b ... d -> b (...) d') + pe
         x = self.layers(x)
@@ -315,7 +317,10 @@ class NTT(nn.Module):
         )
         # convert layers to nn containers
         self.downs = nn.ModuleList(self.downs)
-        self.proj = nn.Linear(dim, num_nodes * (pos_dims + num_classes))
+        self.proj = nn.Sequential(
+            nn.LayerNorm(dim),
+            nn.Linear(dim, num_nodes * (pos_dims + num_classes))
+        )
 
     def forward(self, img, x):
         assert img.ndim == 5

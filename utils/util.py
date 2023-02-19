@@ -82,11 +82,9 @@ def worker_init_fn(worker_id):
 
 def pos_unnormalize(pos, image_shape):
     # pos: b, n, nodes, 3
-    #image: b, c, z, y, x
+    #image: z, y, x
     for i in range(pos.shape[-1]):
-        or1, or2 = 0, image_shape[i+2]
-        m1, m2 = pos[:, :, :, i].min(), pos[:, :, :, i].max()
-        pos[..., i] = (pos[..., i] - m1) * (or2 - or1) / (m2 - m1 + 1e-8) + or1
+        pos[..., i] = pos[..., i] * image_shape[i]
     return pos
 
 
@@ -100,8 +98,9 @@ def accuracy_withmask(pred_cls, pred_pos, lab_cls, lab_pos, mask, image_shape):
         pred_cls, lab_cls = torch.masked_select(pred_cls, cls_mask), torch.masked_select(lab_cls, cls_mask)
         accuracy_cls = (pred_cls == lab_cls).type(torch.float32).mean()
         pos_mask = mask.unsqueeze(3).repeat(1,1,1,3)
-        pred_pos, lab_pos = pos_unnormalize(pred_pos, image_shape), pos_unnormalize(lab_pos, image_shape)
+        pred_pos, lab_pos = pos_unnormalize(pred_pos, image_shape[2:]), pos_unnormalize(lab_pos, image_shape[2:])
         pred_pos, lab_pos = torch.masked_select(pred_pos, pos_mask).view(-1, 3), torch.masked_select(lab_pos, pos_mask).view(-1, 3)
+        
         dist = torch.linalg.norm(pred_pos - lab_pos, dim=-1)
         accuracy_pos = (dist <= 5).type(torch.float32).mean()
     return accuracy_cls, accuracy_pos

@@ -124,13 +124,23 @@ def swc_to_forest(tree, p_idx=-2):
 
 
 if __name__ == '__main__':
-    swcfile = 'c:/Users/fmind/Desktop/17109_4332.29_6759.68_6296.27.swc'
+    swcfile = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task002_ntt_256/18457_26188.42_11641.02_5421.82.swc'
     tree = parse_swc(swcfile)
-    tree = trim_out_of_box(tree, imgshape=[92, 128, 128])
-    # print(len(tree))
+    sz = 10
+    sy = 10
+    sx = 10
+    new_tree = []
+    for leaf in tree:
+        idx, type_, x, y, z, r, p = leaf
+        x = x - sx
+        y = y - sy
+        z = z - sz
+        new_tree.append((idx, type_, x, y, z, r, p))
+    
+    tree = trim_out_of_box(tree, imgshape=[32, 64, 64])
+    print(len(tree))
     seq_list = swc_to_forest(tree)
     print(len(seq_list[0]))
-    print(len(seq_list[0].shape))
     print(seq_list[0])
 
 
