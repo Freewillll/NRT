@@ -20,7 +20,8 @@ from datasets.swc_processing import trim_out_of_box, swc_to_forest
 sys.setrecursionlimit(30000)
 
 
-PAD = 0
+SEQ_PAD = -1
+NODE_PAD = 0
 EOS = 5
 
 def collate_fn(batch):
@@ -46,11 +47,13 @@ def collate_fn(batch):
         seq = data[1][:max_len]
         pad_shape = [max_len-len(seq)] + list(data[1].shape[1:])
         padding = torch.zeros(pad_shape)
+        padding[:] = SEQ_PAD
         seq = torch.cat((seq, padding), 0).tolist()
 
         cls_ = data[2][:max_len]
         pad_shape = [max_len-len(cls_)] + list(data[2].shape[1:])
-        padding = torch.zeros(pad_shape)
+        padding = torch.zeros(pad_shape, dtype=torch.int64)
+        padding[:] = SEQ_PAD
         cls_= torch.cat((cls_, padding), 0).tolist()
 
         output_img.append(data[0].tolist())
@@ -65,20 +68,32 @@ def collate_fn(batch):
     return output_img, output_seq, output_cls, output_imgfile, output_swcfile
 
 
-def draw_lab(lab, lab_image):
+def draw_lab(lab, cls_, img):
     # the shape of lab         seq_len, item_len, vec_len
     # the shape of lab_image   z, y, x 
-    imgshape = lab_image.shape
+    lab_img = np.repeat(img, 3, axis=0)
+    lab_img[0, :, :, :] = 0
+    lab_img[2, :, :, :] = 0
+    lab = lab[:-1, ...]
+    cls_ = cls_[:-1, ...]
     # filter out invalid  point
-    nodes = lab[lab[:, :, -1] > 0]
+    nodes = lab[cls_ > 0]
+    cls_ = cls_[cls_ > 0]
     # keep the position of nodes in the range of imgshape
-    nodes = np.clip(nodes, [0,0,0,0], [i -1 for i in imgshape] + [EOS]).astype(int)[:,:-1]
+    nodes = np.clip(nodes, [0,0,0], [i -1 for i in imgshape]).numpy().astype(int)
     # draw nodes
-    for node in nodes:
-        lab_image[node[0], node[1], node[2]] = 1
-    selem = np.ones((1,3,3), dtype=np.uint8)
-    lab_image = morphology.dilation(lab_image, selem)
-    return lab_image
+    for idx, node in enumerate(nodes):
+        if cls_[idx] == 1: # root white
+            lab_img[:, node[0], node[1], node[2]] = 255
+        elif cls_[idx] == 2: # branching point yellow
+            lab_img[0, node[0], node[1], node[2]] = 255
+        elif cls_[idx] == 3: # tip blue
+            lab_img[2, node[0], node[1], node[2]] = 255
+        elif cls_[idx] == 4: #boundary blue
+            lab_img[2, node[0], node[1], node[2]] = 255
+    selem = np.ones((1,2,3,3), dtype=np.uint8)
+    lab_img = morphology.dilation(lab_img, selem)
+    return lab_img
 
 
 class GenericDataset(tudata.Dataset):
@@ -154,7 +169,9 @@ class GenericDataset(tudata.Dataset):
                 for seq_item in seq:
                     if len(seq_item) <= self.seq_node_nums:
                         for i in range(self.seq_node_nums - len(seq_item)):
-                            seq_item.append(self.node_dim * [PAD])
+                            node_pad = self.node_dim * [0]
+                            node_pad[-1] = NODE_PAD
+                            seq_item.append(node_pad)
                     else:
                         len_outofrange = True
                         if idx not in outofrange_list:
@@ -171,7 +188,7 @@ class GenericDataset(tudata.Dataset):
             seq = np.asarray(seq_list[maxlen_idx])
             # add eos
             eos = np.zeros((1, self.seq_node_nums, self.node_dim))
-            eos[..., -1] = EOS
+            eos[..., 0, -1] = EOS
             seq = np.concatenate((seq, eos), axis=0)
             cls_ = seq[..., -1].copy()
             #normailize
@@ -183,51 +200,53 @@ class GenericDataset(tudata.Dataset):
         else:
             lab = np.random.randn((5, self.seq_node_nums, self.node_dim)) > 0.5
             cls_ = np.random.randn((5, self.seq_node_nums)) > 0.5
-            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(lab.astype(np.float32)), troch.from_numpy(cls_.astype(np.int64)), imgfile, swcfile
+            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(lab.astype(np.float32)), torch.from_numpy(cls_.astype(np.int64)), imgfile, swcfile
 
 
 if __name__ == '__main__':
 
     import skimage.morphology as morphology
-    import cv2 as cv
+    # import cv2 as cv
     from torch.utils.data.distributed import DistributedSampler
     import utils.util as util
+    # import matplotlib.pyplot as plt
+    from utils.image_util import *
+    # from datasets.mip import *
+    from train import *
 
 
     split_file = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task002_ntt_256/data_splits.pkl'
-    idx = 1
+    idx = 6
     imgshape = (32, 64, 64)
     dataset = GenericDataset(split_file, 'train', imgshape=imgshape)
 
-    # loader = tudata.DataLoader(dataset, 2, 
-    #                             num_workers=8, 
-    #                             shuffle=False, pin_memory=True,
-    #                             drop_last=True, 
-    #                             collate_fn=collate_fn,
-    #                             worker_init_fn=util.worker_init_fn)
-    # for i, batch in enumerate(loader):
-    #     img, seq ,*_ = batch
-    #     print(img.shape)
-    #     print(seq.shape)
-    #     break
+    loader = tudata.DataLoader(dataset, 4, 
+                                num_workers=8, 
+                                shuffle=False, pin_memory=True,
+                                drop_last=True, 
+                                collate_fn=collate_fn,
+                                worker_init_fn=util.worker_init_fn)
+    for i, batch in enumerate(loader):
+        img, seq , cls_, imgfiles, swcfile = batch
+        print(seq)
+        print(cls_)
+        save_image_in_training(imgfiles, img, seq, cls_, pred=None, phase='train', epoch=1, idx=0)
+        break
+        
 
-    img, lab, *_ = dataset.pull_item(idx)
-    lab_image = np.zeros(img.shape[1:])
-    print(lab_image.shape)
-    print(lab)
-    lab = lab.numpy()
-    lab_image = draw_lab(lab, lab_image)
-    
 
-    import matplotlib.pyplot as plt
-    from utils.image_util import *
-    from datasets.mip import *
+    # img, lab, cls_, *_ = dataset.pull_item(idx)
+    # img = unnormalize_normal(img.numpy()).astype(np.uint8)
+    # pos = util.pos_unnormalize(lab[..., :3], img.shape[1:])
+    # print(pos)
+    # print(cls_)
+    # lab_image = draw_lab(pos, cls_, img)
 
-    img = unnormalize_normal(img.numpy()).astype(np.uint8)[0]
-    lab_image = unnormalize_normal(lab_image).astype(np.uint8)[0]
-    print(lab_image.shape)
-    print(lab_image.dtype)
-    plt.imshow(cv.addWeighted(convert_color_w(img_contrast(np.max(img, axis=0), contrast=5.0)), 0.5,
-               convert_color_r(np.max(lab_image, axis=0)), 0.5, 0))
-    plt.savefig('test.png')
+    # save_image('test.v3draw', lab_image)
+    # lab_image = lab_image[1]
+    # print(lab_image.shape)
+    # print(lab_image.dtype)
+    # plt.imshow(cv.addWeighted(convert_color_w(img_contrast(np.max(img[0], axis=0), contrast=5.0)), 0.5,
+    #            convert_color_r(np.max(lab_image, axis=0)), 0.5, 0))
+    # plt.savefig('test.png')
 

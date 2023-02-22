@@ -61,7 +61,7 @@ def get_attn_pad_mask(seq_q, seq_k):
     # b, n
     b_size, len_q = seq_q.size()
     b_size, len_k = seq_k.size()
-    pad_attn_mask = seq_k.data.eq(PAD).unsqueeze(1)  # b_size x 1 x len_k
+    pad_attn_mask = seq_k.data.eq(SEQ_PAD).unsqueeze(1)  # b_size x 1 x len_k
     return pad_attn_mask.expand(b_size, len_q, len_k)  # b_size x len_q x len_k
 
 
@@ -83,16 +83,16 @@ class ResidualBlock(nn.Module):
         padding = tuple((k - 1) // 2 for k in kernel)
         self.left = nn.Sequential(
             nn.Conv3d(inchannel, outchannel, kernel_size=kernel, stride=stride, padding=padding, bias=True),
-            nn.InstanceNorm3d(outchannel, affine=True),
+            nn.BatchNorm3d(outchannel, affine=True),
             nn.ELU(alpha=0.2, inplace=True),
             nn.Conv3d(outchannel, outchannel, kernel_size=3, stride=1, padding=1, bias=True),
-            nn.InstanceNorm3d(outchannel, affine=True)
+            nn.BatchNorm3d(outchannel, affine=True)
         )
         self.shortcut = nn.Sequential()
         if stride != 1 or inchannel != outchannel:
             self.shortcut = nn.Sequential(
                 nn.Conv3d(inchannel, outchannel, kernel_size=1, stride=stride, bias=True),
-                nn.InstanceNorm3d(outchannel, affine=True)
+                nn.BatchNorm3d(outchannel, affine=True)
             )
 
     def forward(self, x):
@@ -206,7 +206,7 @@ class Encoder(nn.Module):
         assert image_height % patch_height == 0 and image_width % patch_width == 0 and image_depth % patch_depth == 0,\
             'Image dimensions must be divisible by the patch size.'
 
-        num_patches = (image_depth // patch_depth) * (image_height // patch_height) * (image_width // patch_width)
+        # num_patches = (image_depth // patch_depth) * (image_height // patch_height) * (image_width // patch_width)
         patch_dim = channels * patch_depth * patch_height * patch_width
 
         self.to_patch_embedding = nn.Sequential(
@@ -268,12 +268,12 @@ class NTT(nn.Module):
 
         # the first layer to process the input image
         self.pre_layer = nn.Sequential(
-            ConvDropoutNormNonlin(in_channels, base_num_filters),
-            ConvDropoutNormNonlin(base_num_filters, base_num_filters),
+            ConvDropoutNormNonlin(in_channels, base_num_filters, norm_op=nn.BatchNorm3d),
+            ConvDropoutNormNonlin(base_num_filters, base_num_filters, norm_op=nn.BatchNorm3d),
         )
 
         in_channels = base_num_filters
-        out_channels = 2 * base_num_filters
+        out_channels = base_num_filters
         down_filters = []
         self.down_d = 1
         self.down_h = 1
@@ -286,6 +286,8 @@ class NTT(nn.Module):
             self.down_h *= stride[2]
             down_filters.append((in_channels, out_channels))
             down = ResidualBlock(in_channels, out_channels, kernel=down_kernel, stride=stride)
+            self.downs.append(down)
+            down = ResidualBlock(out_channels, out_channels, kernel=down_kernel, stride=stride)
             self.downs.append(down)
             in_channels = out_channels
             out_channels = out_channels * 2

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-exp_folder="exps/exp001"
+exp_folder="exps/exp005"
 mkdir -p $exp_folder
 
 
@@ -10,11 +10,11 @@ mkdir -p $exp_folder
 #export WORLD_SIZE=$((NUM_NODES * $NUM_GPUS_PER_NODE))
 
 # launch our script w/ `torch.distributed.launch`
-CUDA_VISIBLE_DEVICES=0 nohup \
+CUDA_VISIBLE_DEVICES=1 nohup \
 python -u train.py \
     --deterministic \
     --weight_decay 1e-4 \
-    --max_epochs 100 \
+    --max_epochs 200 \
     --save_folder ${exp_folder} \
     --amp \
     --step_per_epoch 200 \

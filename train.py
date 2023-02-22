@@ -40,7 +40,7 @@ parser.add_argument('--num_workers', default=4, type=int,
                     help='Number of workers used in dataloading')
 parser.add_argument('--image_shape', default='32,64,64', type=str,
                     help='Input image shape')
-parser.add_argument('--num_item_nodes', default='8', type=int,
+parser.add_argument('--num_item_nodes', default=8, type=int,
                     help='Number of nodes of a item of the seqences')
 parser.add_argument('--node_dim', default=4, type=int,
                     help='The dim of nodes in the sequences')
@@ -110,8 +110,7 @@ def draw_seq(img, seq, cls_, pos):
     img[2, :, :, :] = 0
     # keep the position of nodes in the range of imgshape
     # print(seq.shape, pos.shape, cls_.shape, img.shape)
-    
-    start = np.clip(util.pos_unnormalize(seq.cpu().numpy()[0,0,:3], img.shape[1:]), [0,0,0], [i -1 for i in img.shape[1:]]).astype(int)
+    start = np.clip(util.pos_unnormalize(seq.cpu().numpy()[0,0,:3].copy(), img.shape[1:]), [0,0,0], [i -1 for i in img.shape[1:]]).astype(int)
     nodes = np.clip(util.pos_unnormalize(pos.cpu().numpy(), img.shape[1:]), [0,0,0], [i -1 for i in img.shape[1:]]).astype(int)
     # draw nodes
     img[:, start[0], start[1], start[2]] = 255  # start point white
@@ -137,25 +136,29 @@ def save_image_in_training(imgfiles, img, seq, cls_, pred, epoch, phase, idx):
     with torch.no_grad():
         img = (unnormalize_normal(img[idx].numpy())).astype(np.uint8)
         # -> n, nodes, dim
-        trg, cls_, pred = seq[idx, 1:], cls_[idx, 1:], pred[idx]
-        # add start points
-        pred_cls = torch.argmax(pred[..., 3:], dim=1)
-        pred = pred[torch.where(pred_cls > 0)]  # n, dim
-        pred_cls = pred_cls[torch.where(pred_cls > 0)]
-        trg = trg[torch.where(cls_ > 0)]
-        cls_ = cls_[torch.where(cls_ > 0)]
-        img_pred = draw_seq(img, seq[idx], pred_cls, pred[..., :3])
+        trg, cls_ = seq[idx], cls_[idx]
+        trg = rearrange(trg, 'n nodes dim -> (n nodes) dim')
+        cls_ = rearrange(cls_, 'n nodes -> (n nodes)')
         img_lab = draw_seq(img, seq[idx], cls_, trg[..., :3])
-
         if phase == 'train':
             out_lab_file = f'debug_epoch{epoch}_{prefix}_{phase}_lab.v3draw'
-            out_pred_file = f'debug_epoch{epoch}_{prefix}_{phase}_pred.v3draw'
         else:
-            out_lab_file = f'debug_{prefix}_{phase}_lab.v3draw'
-            out_pred_file = f'debug_{prefix}_{phase}_pred.v3draw'
+            out_lab_file = f'debug_epoch{epoch}_{prefix}_{phase}_lab.v3draw'
+            
+        save_image(os.path.join(out_lab_file), img_lab)
+            
+        if pred != None:
+            pred = pred[idx]
+            pred = rearrange(pred, 'n nodes dim -> (n nodes) dim')
+            pred_cls = torch.argmax(pred[..., 3:], dim=1)
+            img_pred = draw_seq(img, seq[idx], pred_cls, pred[..., :3])
 
-        save_image(os.path.join(args.save_folder, out_lab_file), img_lab)
-        save_image(os.path.join(args.save_folder, out_pred_file), img_pred)
+            if phase == 'train':
+                out_pred_file = f'debug_epoch{epoch}_{prefix}_{phase}_pred.v3draw'
+            else:
+                out_pred_file = f'debug_epoch{epoch}_{prefix}_{phase}_pred.v3draw'
+
+            save_image(os.path.join(out_pred_file), img_pred)
 
 
 def get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes, loss_weight):
@@ -172,15 +175,17 @@ def get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes, loss_weight):
     trg_pos = trg[..., :3]
     # -> b, nodes, n
     trg_cls = cls_.contiguous().transpose(-1, -2)
-    # b, n, nodes
-    mask = cls_ != 0
-    accuracy_cls, accuracy_pos = util.accuracy_withmask(pred_cls_t.clone(), pred_pos.clone(), trg_cls.clone(), trg_pos.clone(), mask.clone(), img.shape)
+    # cls weight
+    cls_mask = trg_cls > 0 
+    cls_weight = torch.ones(cls_mask.size(), dtype=pred.dtype, device=pred.device)
+    cls_weight[cls_mask] = 5
+    # b, n, nodes       remove pad and eos
+    pos_mask = ((cls_ > 0) * (cls_ != 5)).unsqueeze(3).repeat(1, 1, 1, 3)
+    accuracy_cls, accuracy_pos = util.accuracy_withmask(pred_cls_t.clone(), pred_pos.clone(), trg_cls.clone(), trg_pos.clone(), pos_mask.clone(), img.shape)
     # b, n, nodes, 3
-    pos_mask = mask.unsqueeze(3).repeat(1, 1, 1, 3)
-    loss_ce, loss_box = crit_ce(pred_cls_t, trg_cls), crit_box(pred_pos, trg_pos)
-    loss_mask_box = (loss_box * pos_mask).sum() / pos_mask.sum()
-    loss = loss_weight[0] * loss_ce + loss_weight[1] * loss_mask_box
-    return loss_ce, loss_mask_box, loss, accuracy_cls, accuracy_pos, pred
+    loss_ce, loss_box = (crit_ce(pred_cls_t, trg_cls) * cls_weight).mean(), (crit_box(pred_pos, trg_pos) * pos_mask).sum() / pos_mask.sum()
+    loss = loss_weight[0] * loss_ce + loss_weight[1] * loss_box
+    return loss_ce, loss_box, loss, accuracy_cls, accuracy_pos, pred
 
 
 def get_forward_eval(img, seq, cls_, crit_ce, crit_box, model, nodes, loss_weight):
@@ -258,7 +263,7 @@ def load_dataset(phase, imgshape):
 def evaluate(model, optimizer, crit_ce, crit_box, imgshape, phase, loss_weight):
     val_loader, val_iter = load_dataset(phase, imgshape)
     args.curr_epoch = 0
-    loss_ce, loss_dice, loss = validate(model, val_loader, crit_ce, crit_box, loss_weight, epoch=0, debug=True, num_image_save=-1,
+    loss_ce, loss_dice, *_ = validate(model, val_loader, crit_ce, crit_box, loss_weight, epoch=0, debug=True, num_image_save=-1,
                                         phase=phase)
     ddp_print(f'Average loss_ce and loss_dice: {loss_ce:.5f} {loss_dice:.5f}')
 
@@ -405,12 +410,12 @@ def main():
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=args.weight_decay, amsgrad=True)
 
-    crit_ce = nn.CrossEntropyLoss(ignore_index=ntt.PAD).to(args.device)
+    crit_ce = nn.CrossEntropyLoss(ignore_index=SEQ_PAD, reduction='none').to(args.device)
     crit_box = nn.MSELoss(reduction='none').to(args.device)
     args.imgshape = tuple(map(int, args.image_shape.split(',')))
     loss_weight = list(map(float, args.loss_weight.split(',')))
-    sum_weights = sum(loss_weight)
-    loss_weight = [w / sum_weights for w in loss_weight]
+    # sum_weights = sum(loss_weight)
+    # loss_weight = [w / sum_weights for w in loss_weight]
 
     # Print out the arguments information
     ddp_print('Argument are: ')
