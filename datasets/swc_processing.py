@@ -50,7 +50,7 @@ def trim_out_of_box(tree_orig, imgshape, keep_candidate_points=True):
     return tree
 
 
-def swc_to_forest(tree, p_idx=-2):
+def swc_to_forest(tree, imgshape, max_level=1, p_idx=-2):
         pos_dict = {}
         seq_list = []
         level_dict = defaultdict(list)
@@ -113,10 +113,12 @@ def swc_to_forest(tree, p_idx=-2):
             sorted(level_dict)
             for key in level_dict:
                 seq_item = []
-                for idx in level_dict[key]:
-                    node = tree.get_node(idx)
-                    seq_item.append(list(node.data) + [node.tag])
-                seq.append(seq_item)
+                if key <= max_level:
+                    for idx in level_dict[key]:
+                        node = tree.get_node(idx)
+                        pos = np.clip(list(node.data), [0,0,0], [i -1 for i in imgshape])
+                        seq_item.append(list(pos) + [node.tag])
+                    seq.append(seq_item)
             seq_list.append(seq)
             Trees.append(tree)
             level_dict.clear()
@@ -124,11 +126,11 @@ def swc_to_forest(tree, p_idx=-2):
 
 
 if __name__ == '__main__':
-    swcfile = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task002_ntt_256/18457_26188.42_11641.02_5421.82.swc'
+    swcfile = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task002_ntt_256/17302_18816.00_39212.03_2416.26.swc'
     tree = parse_swc(swcfile)
-    sz = 10
-    sy = 10
-    sx = 10
+    sz = 50
+    sy = 100
+    sx = 100
     new_tree = []
     for leaf in tree:
         idx, type_, x, y, z, r, p = leaf
@@ -136,11 +138,10 @@ if __name__ == '__main__':
         y = y - sy
         z = z - sz
         new_tree.append((idx, type_, x, y, z, r, p))
-    
-    tree = trim_out_of_box(tree, imgshape=[32, 64, 64])
+    tree = trim_out_of_box(new_tree, imgshape=[32, 64, 64])
     print(len(tree))
-    seq_list = swc_to_forest(tree)
-    print(len(seq_list[0]))
+    seq_list = swc_to_forest(tree, imgshape=[32,64,64])
+    print(seq_list)
     print(seq_list[0])
 
 

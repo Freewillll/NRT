@@ -443,11 +443,18 @@ class RandomCrop(AbstractTransform):
             target_shape = self.imgshape
             if self.force_fg_sampling:
                 num_trail = 0
-                while num_trail < 100:
+                soma_tag = False
+                while num_trail < 200:
+                    soma_tag = False
                     new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
                     crop_tree = trim_out_of_box(new_tree, target_shape)
                     if len(crop_tree) > 10:
-                        break
+                        for line in crop_tree:
+                            if line[-2] == -1:
+                                soma_tag = True
+                                break
+                        if not soma_tag:
+                            break
                     num_trail += 1
                 else:
                     print("No foreground found after random crops!")
@@ -459,13 +466,20 @@ class RandomCrop(AbstractTransform):
         else:
             if self.force_fg_sampling:
                 num_trail = 0
+                soma_tag = False
                 while num_trail < 200:
+                    soma_tag = False
                     shape, target_shape = get_random_shape(self.imgshape, self.crop_range, self.per_axis)
                     new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
                     # check foreground existence
                     crop_tree = trim_out_of_box(new_tree, target_shape)
-                    if len(crop_tree) > 20:
-                        break
+                    if len(crop_tree) > 10:
+                        for line in crop_tree:
+                            if line[-2] == -1:
+                                soma_tag = True
+                                break
+                        if not soma_tag:
+                            break
                     num_trail += 1
                 else:
                     print("No foreground found after random crops!")

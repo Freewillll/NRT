@@ -98,7 +98,7 @@ def draw_lab(lab, cls_, img):
 
 class GenericDataset(tudata.Dataset):
 
-    def __init__(self, split_file, phase='train', imgshape=(32, 64, 64), seq_node_nums=8, node_dim=4):
+    def __init__(self, split_file, phase='train', imgshape=(32, 64, 64), seq_node_nums=2, node_dim=4):
         self.data_list = self.load_data_list(split_file, phase)
         self.imgshape = imgshape
         print(f'Image shape of {phase}: {imgshape}')
@@ -148,7 +148,7 @@ class GenericDataset(tudata.Dataset):
 
         if tree is not None and self.phase != 'test':
             tree_crop = trim_out_of_box(tree, img[0].shape, True)
-            seq_list = swc_to_forest(tree_crop)
+            seq_list = swc_to_forest(tree_crop, img[0].shape)
             
             # if len(seq_list) == 0:
             #     os.makedirs('./debug', exist_ok=True)
@@ -160,8 +160,8 @@ class GenericDataset(tudata.Dataset):
             # find the seq has max len
             maxlen_idx = 0         
             maxlen = 0
-            len_outofrange = False
             outofrange_list = []
+            len_outofrange = False
             for idx, seq in enumerate(seq_list):
                 if maxlen < len(seq):
                     maxlen = len(seq)
@@ -176,7 +176,6 @@ class GenericDataset(tudata.Dataset):
                         len_outofrange = True
                         if idx not in outofrange_list:
                             outofrange_list.append(idx)
-                        # print(len(seq_item))
                         break
 
             # find a seq the lenght of which is in range
@@ -184,8 +183,8 @@ class GenericDataset(tudata.Dataset):
                 for idx in range(0, len(seq_list)):
                     if idx not in outofrange_list:
                         maxlen_idx = idx
-            # print(f'----------maxlen idx : {maxlen_idx}---------len: {len(seq_list)}')
             seq = np.asarray(seq_list[maxlen_idx])
+
             # add eos
             eos = np.zeros((1, self.seq_node_nums, self.node_dim))
             eos[..., 0, -1] = EOS
@@ -216,7 +215,7 @@ if __name__ == '__main__':
 
 
     split_file = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task002_ntt_256/data_splits.pkl'
-    idx = 6
+    idx = 1
     imgshape = (32, 64, 64)
     dataset = GenericDataset(split_file, 'train', imgshape=imgshape)
 
@@ -230,7 +229,7 @@ if __name__ == '__main__':
         img, seq , cls_, imgfiles, swcfile = batch
         print(seq)
         print(cls_)
-        save_image_in_training(imgfiles, img, seq, cls_, pred=None, phase='train', epoch=1, idx=0)
+        # save_image_in_training(imgfiles, img, seq, cls_, pred=None, phase='train', epoch=1, idx=0)
         break
         
 

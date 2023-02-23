@@ -216,12 +216,14 @@ class Encoder(nn.Module):
             nn.LayerNorm(dim)
         )
         self.layers = Encoderlayer(dim, depth, heads, dim_head, mlp_dim)
+        self.norm = nn.LayerNorm(dim)
 
     def forward(self, img):
         x = self.to_patch_embedding(img)
         pe = posemb_sincos_3d(x)
         x = rearrange(x, 'b ... d -> b (...) d') + pe
         x = self.layers(x)
+        x = self.norm(x)
         x = x.mean(dim=1)
         return x
 
@@ -345,7 +347,7 @@ if __name__ == '__main__':
     print('Initialize model...')
 
     img = torch.randn(2, 1, 32, 64, 64)
-    seq = torch.randn(2, 10, 8, 4)
+    seq = torch.randn(2, 10, 2, 4)
     model = NTT(**configs)
     print(model)
     outputs = model(img, seq)
@@ -353,4 +355,4 @@ if __name__ == '__main__':
     for output in outputs:
         print('output size: ', output.size())
 
-    summary(model, input_size=[(2, 1, 32, 64, 64), (2, 10, 8, 4)])
+    summary(model, input_size=[(2, 1, 32, 64, 64), (2, 10, 2, 4)])
