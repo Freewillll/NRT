@@ -288,6 +288,7 @@ def train(model, optimizer, crit_ce, crit_box, imgshape, loss_weight):
     grad_scaler = GradScaler()
     debug = True
     debug_idx = 0
+    best_accuracy = 0
     for epoch in range(args.max_epochs):
         # push the epoch information to global namespace args
         args.curr_epoch = epoch
@@ -346,6 +347,11 @@ def train(model, optimizer, crit_ce, crit_box, imgshape, loss_weight):
             ddp_print('Evaluate on val set')
             val_loss_ce, val_loss_box, val_loss, val_accuracy_cls, val_accuracy_pos = validate(model, val_loader, crit_ce, crit_box, loss_weight, epoch, debug=debug,
                                                             phase='val')
+            avg_accuracy = (val_accuracy_cls + val_accuracy_pos) / 2
+            if avg_accuracy > best_accuracy and args.is_master:
+                best_accuracy = avg_accuracy
+                torch.save(model, os.path.join(args.save_folder, 'best_model.pt'))
+
             model.train()  # back to train phase
             ddp_print(f'[Val{epoch}] average ce loss, box loss and the sum are {val_loss_ce:.5f}, {val_loss_box:.5f}, {val_loss:.5f},\
                  cls accuracy and pos accuracy are {val_accuracy_cls:.3f}, {val_accuracy_pos:.3f}')

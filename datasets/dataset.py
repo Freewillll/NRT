@@ -173,18 +173,11 @@ class GenericDataset(tudata.Dataset):
                             node_pad[-1] = NODE_PAD
                             seq_item.append(node_pad)
                     else:
-                        len_outofrange = True
-                        if idx not in outofrange_list:
-                            outofrange_list.append(idx)
-                        break
+                        for i in range(len(seq_item) - self.seq_node_nums):
+                            seq_item.pop()
 
             # find a seq the lenght of which is in range
-            if len_outofrange:
-                for idx in range(0, len(seq_list)):
-                    if idx not in outofrange_list:
-                        maxlen_idx = idx
             seq = np.asarray(seq_list[maxlen_idx])
-
             # add eos
             eos = np.zeros((1, self.seq_node_nums, self.node_dim))
             eos[..., 0, -1] = EOS
