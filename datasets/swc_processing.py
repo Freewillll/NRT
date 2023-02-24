@@ -50,7 +50,7 @@ def trim_out_of_box(tree_orig, imgshape, keep_candidate_points=True):
     return tree
 
 
-def swc_to_forest(tree, p_idx=-2):
+def swc_to_forest(tree, imgshape, p_idx=-2):
         pos_dict = {}
         seq_list = []
         level_dict = defaultdict(list)
@@ -115,7 +115,8 @@ def swc_to_forest(tree, p_idx=-2):
                 seq_item = []
                 for idx in level_dict[key]:
                     node = tree.get_node(idx)
-                    seq_item.append(list(node.data) + [node.tag])
+                    pos = np.clip(list(node.data), [0,0,0], [i-1 for i in imgshape])
+                    seq_item.append(list(pos) + [node.tag])
                 seq.append(seq_item)
             seq_list.append(seq)
             Trees.append(tree)

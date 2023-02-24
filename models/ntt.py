@@ -216,12 +216,14 @@ class Encoder(nn.Module):
             nn.LayerNorm(dim)
         )
         self.layers = Encoderlayer(dim, depth, heads, dim_head, mlp_dim)
+        self.norm = nn.LayerNorm(dim)
 
     def forward(self, img):
         x = self.to_patch_embedding(img)
         pe = posemb_sincos_3d(x)
         x = rearrange(x, 'b ... d -> b (...) d') + pe
         x = self.layers(x)
+        x = self.norm(x)
         x = x.mean(dim=1)
         return x
 

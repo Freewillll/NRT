@@ -110,8 +110,10 @@ def draw_seq(img, seq, cls_, pos):
     img[2, :, :, :] = 0
     # keep the position of nodes in the range of imgshape
     # print(seq.shape, pos.shape, cls_.shape, img.shape)
-    start = np.clip(util.pos_unnormalize(seq.cpu().numpy()[0,0,:3].copy(), img.shape[1:]), [0,0,0], [i -1 for i in img.shape[1:]]).astype(int)
-    nodes = np.clip(util.pos_unnormalize(pos.cpu().numpy(), img.shape[1:]), [0,0,0], [i -1 for i in img.shape[1:]]).astype(int)
+    start = seq[0, 0, :3].cpu().numpy().copy()
+    nodes = pos.cpu().numpy().copy()
+    start = np.clip(util.pos_unnormalize(start, img.shape[1:]), [0,0,0], [i -1 for i in img.shape[1:]]).astype(int)
+    nodes = np.clip(util.pos_unnormalize(nodes, img.shape[1:]), [0,0,0], [i -1 for i in img.shape[1:]]).astype(int)
     # draw nodes
     img[:, start[0], start[1], start[2]] = 255  # start point white
     for idx, node in enumerate(nodes):
@@ -139,26 +141,26 @@ def save_image_in_training(imgfiles, img, seq, cls_, pred, epoch, phase, idx):
         trg, cls_ = seq[idx], cls_[idx]
         trg = rearrange(trg, 'n nodes dim -> (n nodes) dim')
         cls_ = rearrange(cls_, 'n nodes -> (n nodes)')
-        img_lab = draw_seq(img, seq[idx], cls_, trg[..., :3])
+        img_lab = draw_seq(img, seq[idx].clone(), cls_, trg[..., :3])
         if phase == 'train':
             out_lab_file = f'debug_epoch{epoch}_{prefix}_{phase}_lab.v3draw'
         else:
             out_lab_file = f'debug_epoch{epoch}_{prefix}_{phase}_lab.v3draw'
             
-        save_image(os.path.join(out_lab_file), img_lab)
+        save_image(os.path.join(args.save_folder, out_lab_file), img_lab)
             
         if pred != None:
             pred = pred[idx]
             pred = rearrange(pred, 'n nodes dim -> (n nodes) dim')
             pred_cls = torch.argmax(pred[..., 3:], dim=1)
-            img_pred = draw_seq(img, seq[idx], pred_cls, pred[..., :3])
+            img_pred = draw_seq(img, seq[idx].clone(), pred_cls, pred[..., :3])
 
             if phase == 'train':
                 out_pred_file = f'debug_epoch{epoch}_{prefix}_{phase}_pred.v3draw'
             else:
                 out_pred_file = f'debug_epoch{epoch}_{prefix}_{phase}_pred.v3draw'
 
-            save_image(os.path.join(out_pred_file), img_pred)
+            save_image(os.path.join(args.save_folder, out_pred_file), img_pred)
 
 
 def get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes, loss_weight):
@@ -178,7 +180,7 @@ def get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes, loss_weight):
     # cls weight
     cls_mask = trg_cls > 0 
     cls_weight = torch.ones(cls_mask.size(), dtype=pred.dtype, device=pred.device)
-    cls_weight[cls_mask] = 5
+    cls_weight[cls_mask] = 2
     # b, n, nodes       remove pad and eos
     pos_mask = ((cls_ > 0) * (cls_ != 5)).unsqueeze(3).repeat(1, 1, 1, 3)
     accuracy_cls, accuracy_pos = util.accuracy_withmask(pred_cls_t.clone(), pred_pos.clone(), trg_cls.clone(), trg_pos.clone(), pos_mask.clone(), img.shape)
@@ -286,6 +288,7 @@ def train(model, optimizer, crit_ce, crit_box, imgshape, loss_weight):
     grad_scaler = GradScaler()
     debug = True
     debug_idx = 0
+    best_accuracy = 0
     for epoch in range(args.max_epochs):
         # push the epoch information to global namespace args
         args.curr_epoch = epoch
@@ -344,6 +347,11 @@ def train(model, optimizer, crit_ce, crit_box, imgshape, loss_weight):
             ddp_print('Evaluate on val set')
             val_loss_ce, val_loss_box, val_loss, val_accuracy_cls, val_accuracy_pos = validate(model, val_loader, crit_ce, crit_box, loss_weight, epoch, debug=debug,
                                                             phase='val')
+            avg_accuracy = (val_accuracy_cls + val_accuracy_pos) / 2
+            if avg_accuracy > best_accuracy and args.is_master:
+                best_accuracy = avg_accuracy
+                torch.save(model, os.path.join(args.save_folder, 'best_model.pt'))
+
             model.train()  # back to train phase
             ddp_print(f'[Val{epoch}] average ce loss, box loss and the sum are {val_loss_ce:.5f}, {val_loss_box:.5f}, {val_loss:.5f},\
                  cls accuracy and pos accuracy are {val_accuracy_cls:.3f}, {val_accuracy_pos:.3f}')

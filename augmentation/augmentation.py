@@ -443,7 +443,7 @@ class RandomCrop(AbstractTransform):
             target_shape = self.imgshape
             if self.force_fg_sampling:
                 num_trail = 0
-                while num_trail < 100:
+                while num_trail < 200:
                     new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
                     crop_tree = trim_out_of_box(new_tree, target_shape)
                     if len(crop_tree) > 10:
@@ -464,7 +464,7 @@ class RandomCrop(AbstractTransform):
                     new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
                     # check foreground existence
                     crop_tree = trim_out_of_box(new_tree, target_shape)
-                    if len(crop_tree) > 20:
+                    if len(crop_tree) > 10:
                         break
                     num_trail += 1
                 else:

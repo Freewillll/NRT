@@ -148,7 +148,7 @@ class GenericDataset(tudata.Dataset):
 
         if tree is not None and self.phase != 'test':
             tree_crop = trim_out_of_box(tree, img[0].shape, True)
-            seq_list = swc_to_forest(tree_crop)
+            seq_list = swc_to_forest(tree_crop, img[0].shape)
             
             # if len(seq_list) == 0:
             #     os.makedirs('./debug', exist_ok=True)
@@ -160,8 +160,6 @@ class GenericDataset(tudata.Dataset):
             # find the seq has max len
             maxlen_idx = 0         
             maxlen = 0
-            len_outofrange = False
-            outofrange_list = []
             for idx, seq in enumerate(seq_list):
                 if maxlen < len(seq):
                     maxlen = len(seq)
@@ -173,18 +171,11 @@ class GenericDataset(tudata.Dataset):
                             node_pad[-1] = NODE_PAD
                             seq_item.append(node_pad)
                     else:
-                        len_outofrange = True
-                        if idx not in outofrange_list:
-                            outofrange_list.append(idx)
-                        # print(len(seq_item))
-                        break
+                        for i in range(len(seq_item) - self.seq_node_nums):
+                            seq_item.pop()
 
             # find a seq the lenght of which is in range
-            if len_outofrange:
-                for idx in range(0, len(seq_list)):
-                    if idx not in outofrange_list:
-                        maxlen_idx = idx
-            # print(f'----------maxlen idx : {maxlen_idx}---------len: {len(seq_list)}')
+
             seq = np.asarray(seq_list[maxlen_idx])
             # add eos
             eos = np.zeros((1, self.seq_node_nums, self.node_dim))
