@@ -149,6 +149,10 @@ class GenericDataset(tudata.Dataset):
         if tree is not None and self.phase != 'test':
             tree_crop = trim_out_of_box(tree, img[0].shape, True)
             seq_list = swc_to_forest(tree_crop, img[0].shape)
+
+            if len(seq_list) == 0:
+                print("-------------------No sequence found!------------------")
+                print(tree_crop)
             
             # if len(seq_list) == 0:
             #     os.makedirs('./debug', exist_ok=True)
@@ -219,10 +223,10 @@ if __name__ == '__main__':
                                 worker_init_fn=util.worker_init_fn)
     for i, batch in enumerate(loader):
         img, seq , cls_, imgfiles, swcfile = batch
-        print(seq)
+        # print(seq)
         print(cls_)
-        save_image_in_training(imgfiles, img, seq, cls_, pred=None, phase='train', epoch=1, idx=0)
-        break
+        # save_image_in_training(imgfiles, img, seq, cls_, pred=None, phase='train', epoch=1, idx=0)
+        # break
         
 
 
