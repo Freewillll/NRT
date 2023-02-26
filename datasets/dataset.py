@@ -152,7 +152,6 @@ class GenericDataset(tudata.Dataset):
 
             if len(seq_list) == 0:
                 print("-------------------No sequence found!------------------")
-                print(tree_crop)
             
             # if len(seq_list) == 0:
             #     os.makedirs('./debug', exist_ok=True)
