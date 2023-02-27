@@ -173,10 +173,10 @@ def get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes, loss_weight):
     pred = rearrange(pred, 'b n (nodes dim) -> b n nodes dim', nodes=nodes)
     pred_pos, pred_cls = pred[..., :3], pred[..., 3:]
     # -> b, cls, nodes, n
-    pred_cls_t = pred_cls.contiguous().transpose(-1, 1)
+    pred_cls_t = pred_cls.transpose(-1, 1).contiguous()
     trg_pos = trg[..., :3]
     # -> b, nodes, n
-    trg_cls = cls_.contiguous().transpose(-1, -2)
+    trg_cls = cls_.transpose(-1, -2).contiguous()
     # cls weight
     cls_mask = trg_cls > 0 
     cls_weight = torch.ones(cls_mask.size(), dtype=pred.dtype, device=pred.device)

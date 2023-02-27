@@ -93,7 +93,10 @@ def accuracy_withmask(pred_cls, pred_pos, lab_cls, lab_pos, pos_mask, image_shap
     # mask: b, n, nodes
     accuracy_pos, accuracy_cls = 0, 0
     with torch.no_grad():
-        pred_cls = torch.argmax(pred_cls, dim=1)
+        pred_cls = torch.argmax(pred_cls, dim=1)        
+        cls_mask = pred_cls >=0
+        pred_cls = pred_cls[cls_mask]
+        lab_cls = lab_cls[cls_mask]
         accuracy_cls = (pred_cls == lab_cls).type(torch.float32).mean()
 
         pred_pos, lab_pos = pos_unnormalize(pred_pos, image_shape[2:]), pos_unnormalize(lab_pos, image_shape[2:])

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-exp_folder="exps/exp009"
+exp_folder="exps/exp011"
 mkdir -p $exp_folder
 
 

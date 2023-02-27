@@ -152,12 +152,6 @@ class GenericDataset(tudata.Dataset):
 
             if len(seq_list) == 0:
                 print("-------------------No sequence found!------------------")
-            
-            # if len(seq_list) == 0:
-            #     os.makedirs('./debug', exist_ok=True)
-            #     write_swc(tree, os.path.join('debug', os.path.split(swcfile)[-1]))
-            #     write_swc(tree_crop, os.path.join('debug', f'crop_{os.path.split(swcfile)[-1]}'))
-            #     print(imgfile, swcfile)
 
             # pad the seq_item 
             # find the seq has max len
