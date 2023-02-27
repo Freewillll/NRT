@@ -153,7 +153,7 @@ def save_image_in_training(imgfiles, img, seq, cls_, pred, epoch, phase, idx):
             pred = pred[idx]
             pred = rearrange(pred, 'n nodes dim -> (n nodes) dim')
             pred_cls = torch.argmax(pred[..., 3:], dim=1)
-            img_pred = draw_seq(img, seq[idx], pred_cls, pred[..., :3])
+            img_pred = draw_seq(img, seq[idx].clone(), pred_cls, pred[..., :3])
 
             if phase == 'train':
                 out_pred_file = f'debug_epoch{epoch}_{prefix}_{phase}_pred.v3draw'
@@ -173,10 +173,10 @@ def get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes, loss_weight):
     pred = rearrange(pred, 'b n (nodes dim) -> b n nodes dim', nodes=nodes)
     pred_pos, pred_cls = pred[..., :3], pred[..., 3:]
     # -> b, cls, nodes, n
-    pred_cls_t = pred_cls.contiguous().transpose(-1, 1)
+    pred_cls_t = pred_cls.transpose(-1, 1).contiguous()
     trg_pos = trg[..., :3]
     # -> b, nodes, n
-    trg_cls = cls_.contiguous().transpose(-1, -2)
+    trg_cls = cls_.transpose(-1, -2).contiguous()
     # cls weight
     cls_mask = trg_cls > 0 
     cls_weight = torch.ones(cls_mask.size(), dtype=pred.dtype, device=pred.device)

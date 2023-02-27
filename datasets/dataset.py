@@ -167,12 +167,6 @@ class GenericDataset(tudata.Dataset):
         if tree is not None and self.phase != 'test':
             tree_crop = trim_out_of_box(tree, img[0].shape, True)
             seq_list = swc_to_forest(tree_crop, img[0].shape)
-            
-            # if len(seq_list) == 0:
-            #     os.makedirs('./debug', exist_ok=True)
-            #     write_swc(tree, os.path.join('debug', os.path.split(swcfile)[-1]))
-            #     write_swc(tree_crop, os.path.join('debug', f'crop_{os.path.split(swcfile)[-1]}'))
-            #     print(imgfile, swcfile)
 
             # pad the seq_item 
             # find the seq has max len
