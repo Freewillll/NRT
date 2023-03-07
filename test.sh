@@ -1,6 +1,6 @@
 #!/bin/bash
 
-exp_folder="exps/exp011"
+exp_folder="exps/exp013"
 mkdir -p $exp_folder
 
 
@@ -15,7 +15,7 @@ python -u train.py \
     --deterministic \
     --weight_decay 1e-4 \
     --loss_weight 1,5 \
-    --max_epochs 300 \
+    --max_epochs 400 \
     --save_folder ${exp_folder} \
     --amp \
     --step_per_epoch 200 \

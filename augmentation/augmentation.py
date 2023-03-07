@@ -427,8 +427,9 @@ class ScaleToFixedSize(AbstractTransform):
 
 
 class RandomCrop(AbstractTransform):
-    def __init__(self, p=0.5, imgshape=None, crop_range=(0.85, 1), per_axis=True, force_fg_sampling=True):
+    def __init__(self, p=0.5, center_p=0.3, imgshape=None, crop_range=(0.85, 1), per_axis=True, force_fg_sampling=True):
         super(RandomCrop, self).__init__(p)
+        self.center_p = center_p
         self.imgshape = imgshape
         self.crop_range = crop_range
         self.per_axis = per_axis
@@ -437,44 +438,65 @@ class RandomCrop(AbstractTransform):
     def __call__(self, img, tree=None):
         if np.random.random() > self.p:
             return img, tree
+        if np.random.random() < self.center_p:
+            shape = np.array(img[0].shape)
+            target_shape = np.array(self.imgshape)
+            # do center cropping
+            sz, sy, sx = (shape - target_shape) // 2
+            new_img = img[:, sz:sz + target_shape[0], sy:sy + target_shape[1], sx:sx + target_shape[2]]
 
-        if self.crop_range[0] == self.crop_range[1]:
-            # print(f'val img shpae: {img.shape}')
-            target_shape = self.imgshape
-            if self.force_fg_sampling:
-                num_trail = 0
-                while num_trail < 200:
-                    new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
-                    crop_tree = trim_out_of_box(new_tree, target_shape)
-                    if len(crop_tree) > 20:
-                        break
-                    num_trail += 1
-                else:
-                    print("No foreground found after random crops!")
+            if tree is not None:
+                new_tree = []
+                for leaf in tree:
+                    idx, type_, x, y, z, r, p = leaf
+                    x = x - sx
+                    y = y - sy
+                    z = z - sz
+                    new_tree.append((idx, type_, x, y, z, r, p))
+
+                return new_img, new_tree
             else:
-                new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
-                
-            return new_img, new_tree
-        
+                return new_img, new_tree
+
         else:
-            if self.force_fg_sampling:
-                num_trail = 0
-                while num_trail < 200:
-                    shape, target_shape = get_random_shape(self.imgshape, self.crop_range, self.per_axis)
-                    new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
-                    # check foreground existence
-                    crop_tree = trim_out_of_box(new_tree, target_shape)
-                    if len(crop_tree) > 20:
-                        break
-                    num_trail += 1
+
+            if self.crop_range[0] == self.crop_range[1]:
+                # print(f'val img shpae: {img.shape}')
+                target_shape = self.imgshape
+                if self.force_fg_sampling:
+                    num_trail = 0
+                    while num_trail < 200:
+                        new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
+                        crop_tree = trim_out_of_box(new_tree, target_shape)
+                        if len(crop_tree) > 20:
+                            break
+                        num_trail += 1
+                    else:
+                        print("No foreground found after random crops!")
                 else:
-                    print("No foreground found after random crops!")
+                    new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
+                    
+                return new_img, new_tree
             
             else:
-                shape, target_shape = get_random_shape(self.imgshape, self.crop_range, self.per_axis)
-                new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
+                if self.force_fg_sampling:
+                    num_trail = 0
+                    while num_trail < 200:
+                        shape, target_shape = get_random_shape(self.imgshape, self.crop_range, self.per_axis)
+                        new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
+                        # check foreground existence
+                        crop_tree = trim_out_of_box(new_tree, target_shape)
+                        if len(crop_tree) > 20:
+                            break
+                        num_trail += 1
+                    else:
+                        print("No foreground found after random crops!")
+                
+                else:
+                    shape, target_shape = get_random_shape(self.imgshape, self.crop_range, self.per_axis)
+                    new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
 
-            return new_img, new_tree
+                return new_img, new_tree
 
 
 # verified
@@ -510,9 +532,9 @@ class CenterCrop(AbstractTransform):
         super(CenterCrop, self).__init__(p)
         self.reference_shape = reference_shape
 
-    def __call__(self, img, gt=None):
+    def __call__(self, img, tree=None):
         if np.random.random() > self.p:
-            return img, gt
+            return img, tree
 
         shape = np.array(img[0].shape)
         target_shape = np.array(self.reference_shape)
@@ -520,12 +542,18 @@ class CenterCrop(AbstractTransform):
         sz, sy, sx = (shape - target_shape) // 2
         img = img[:, sz:sz + target_shape[0], sy:sy + target_shape[1], sx:sx + target_shape[2]]
 
-        if gt is not None:
-            gt = gt[:, sz:sz + target_shape[0], sy:sy + target_shape[1], sx:sx + target_shape[2]]
+        if tree is not None:
+            new_tree = []
+            for leaf in tree:
+                idx, type_, x, y, z, r, p = leaf
+                x = x - sx
+                y = y - sy
+                z = z - sz
+                new_tree.append((idx, type_, x, y, z, r, p))
 
-            return img, gt
+            return img, new_tree
         else:
-            return img, gt
+            return img, new_tree
 
 
 # NOTE: not verified, take care!
@@ -589,7 +617,7 @@ class InstanceAugmentation(object):
         if phase == 'train':
             self.augment = Compose([
                 ConvertToFloat(),
-                RandomCrop(1.0, imgshape, crop_range=(1.0, 1.2), force_fg_sampling=True),
+                RandomCrop(1.0, 0.3, imgshape, crop_range=(1.0, 1.2), force_fg_sampling=True),
                 RandomGammaTransformDualModes(p=p, gamma_range=(0.7, 1.4), per_channel=False, retain_stats=False),
                 RandomGaussianNoise(p=p),
                 # RandomSaturation(p=p),
@@ -602,11 +630,13 @@ class InstanceAugmentation(object):
         elif phase == 'val':
             self.augment = Compose([
                 ConvertToFloat(),
-                RandomCrop(1.0, imgshape, crop_range=(1.0, 1.0), force_fg_sampling=True),
+                RandomCrop(1.0, 0.3, imgshape, crop_range=(1.0, 1.0), force_fg_sampling=True),
             ])
         elif phase == 'test' or phase == 'par':
             self.augment = Compose([
                 ConvertToFloat(),
+                # RandomCrop(1.0, imgshape, crop_range=(1.0, 1.0), force_fg_sampling=True)
+                CenterCrop(1.0, imgshape)  # for test
                 # CenterCropKeepRatio(1.0, imgshape),
                 # ResizeToDividable(divid),
                 # GammaTransform(gamma=0.4, trunc_thresh=0.216, retain_stats=True),  #0.2->0.133

@@ -139,9 +139,9 @@ if __name__ == '__main__':
         new_tree.append((idx, type_, x, y, z, r, p))
     
     tree = trim_out_of_box(tree, imgshape=[32, 64, 64])
-    print(len(tree))
-    seq_list = swc_to_forest(tree)
-    print(len(seq_list[0]))
-    print(seq_list[0])
+    # print(len(tree))
+    seq_list = swc_to_forest(tree, imgshape=[32, 64, 64])
+    # print(len(seq_list[0]))
+    print(seq_list[0][0][0])
 
 

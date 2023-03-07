@@ -97,9 +97,6 @@ def ddp_print(content):
         print(content)
 
 
-# def translate(imgfiles, img)
-
-
 def draw_seq(img, seq, cls_, pos):
     # img: c, z, y, x
     # seq: n, nodes, dim
@@ -180,12 +177,14 @@ def get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes, loss_weight):
     # cls weight
     cls_mask = trg_cls > 0 
     cls_weight = torch.ones(cls_mask.size(), dtype=pred.dtype, device=pred.device)
-    cls_weight[cls_mask] = 2
+    cls_weight[cls_mask] = 10
     # b, n, nodes       remove pad and eos
     pos_mask = ((cls_ > 0) * (cls_ != 5)).unsqueeze(3).repeat(1, 1, 1, 3)
+    pos_weight = torch.ones(pos_mask.size(), dtype=pred.dtype, device=pred.device)
+    pos_weight[pos_mask] = 10
     accuracy_cls, accuracy_pos = util.accuracy_withmask(pred_cls_t.clone(), pred_pos.clone(), trg_cls.clone(), trg_pos.clone(), pos_mask.clone(), img.shape)
     # b, n, nodes, 3
-    loss_ce, loss_box = (crit_ce(pred_cls_t, trg_cls) * cls_weight).mean(), (crit_box(pred_pos, trg_pos) * pos_mask).sum() / pos_mask.sum()
+    loss_ce, loss_box = (crit_ce(pred_cls_t, trg_cls) * cls_weight).mean(), (crit_box(pred_pos, trg_pos) * pos_weight).mean()
     loss = loss_weight[0] * loss_ce + loss_weight[1] * loss_box
     return loss_ce, loss_box, loss, accuracy_cls, accuracy_pos, pred
 

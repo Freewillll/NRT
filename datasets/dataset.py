@@ -138,6 +138,30 @@ class GenericDataset(tudata.Dataset):
         if img.ndim == 3:
             img = img[None]
 
+
+        if swcfile is not None and self.phase == 'test':
+            tree = parse_swc(swcfile)
+            img, tree = self.augment(img, tree)
+            tree_crop = trim_out_of_box(tree, img[0].shape, True)
+            seq_list = swc_to_forest(tree_crop, img[0].shape)
+            z, y, x, _ = seq_list[0][0][0]
+            start_node = [[z, y, x, 1]]
+            for i in range(self.seq_node_nums - len(start_node)):
+                node_pad = self.node_dim * [0]
+                node_pad[-1] = NODE_PAD
+                start_node.append(node_pad)
+
+            start_node = np.expand_dims(np.asarray(start_node), axis=0)
+            cls_ = start_node[..., -1].copy()
+
+            start_node = start_node.astype(np.float32)
+            for i in range(3):
+                start_node[..., i] = (start_node[..., i] - 0) / (img.shape[i+1] - 0 + 1e-8)
+            start_node[..., -1] = (start_node[..., -1] - NODE_PAD) / (EOS - NODE_PAD + 1e-8)
+            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(start_node.astype(np.float32)), torch.from_numpy(cls_.astype(np.int64)), imgfile, swcfile
+
+
+
         if swcfile is not None and self.phase != 'test':
             tree = parse_swc(swcfile)
         else:
@@ -206,7 +230,7 @@ if __name__ == '__main__':
     split_file = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task002_ntt_256/data_splits.pkl'
     idx = 6
     imgshape = (32, 64, 64)
-    dataset = GenericDataset(split_file, 'train', imgshape=imgshape)
+    dataset = GenericDataset(split_file, 'test', imgshape=imgshape)
 
     loader = tudata.DataLoader(dataset, 4, 
                                 num_workers=8, 
@@ -216,7 +240,7 @@ if __name__ == '__main__':
                                 worker_init_fn=util.worker_init_fn)
     for i, batch in enumerate(loader):
         img, seq , cls_, imgfiles, swcfile = batch
-        # print(seq)
+        print(seq)
         print(cls_)
         # save_image_in_training(imgfiles, img, seq, cls_, pred=None, phase='train', epoch=1, idx=0)
         # break
