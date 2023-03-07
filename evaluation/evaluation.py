@@ -19,25 +19,25 @@ class Tracing(object):
             index += 1
         return tree, index
 
-    def trace(self, img, seq):
+    def trace_from_soma(self, img, seq, cls_):
         # pred: b, n, nodes, dims
         # cls_: b, n, nodes
-        cls_ = seq[..., -1]
+    
         for i in range(self.max_len):
             pred = self.model(img, seq)
-            output = pred[:, -1, ...]
+            output = pred[:, -1, ...].clone()
             # pre_cls, b, n, nums
             pred_cls = torch.argmax(output[..., 3:], dim=-1)
-            cls_ = torch.concatenate((cls_, pred_cls.clone()), dim=1)
             if pred_cls[0, 0, 0] == EOS:
-                pos = util.pos_unnormalize(seq, img.shape[2:])
-                return pos, cls_
+                break
             else:
                 # normalize
-                pred_cls = (pred_cls - NODE_PAD) / (EOS - NODE_PAD + 1e-8)
-                seq = torch.concatenate((output[..., :3], pred_cls.unsqueeze(3)), axis=-1)
-        pos = util.pos_unnormalize(seq, img.shape[2:])[0]
-        cls_ = cls_[0]
+                pred_cls = (pred_cls - NODE_PAD) / (EOS - NODE_PAD)
+                pred_seq = torch.concatenate((output[..., :3], pred_cls.unsqueeze(3)), dim=-1)
+                seq = torch.cat((seq, pred_seq), dim=1)
+
+        pos = util.pos_unnormalize(seq[..., :3], img.shape[2:])[0]
+        cls_ = torch.argmax(seq[..., :3], dim=-1)[0]
         
         # pos: n, nodes, dims,  (z, y, x)
         # cls: n, nodes
@@ -45,15 +45,13 @@ class Tracing(object):
         tip_z_m, tip_z_p, tip_y_m, tip_y_p, tip_x_m, tip_x_p= [], [], [], [], [], []
         tree = []
         weight_img = 255 - img
-        level = 0
         index = 1
-        for i in range(len(pos) - 1):
-            for j in range(len(pos[i])):
-                begin = 0
-                if cls_[i, j] != 0:
+        for i in range(len(pos) - 1):  # level i
+            begin = 0
+            for j in range(len(pos[i])):  # nodes in the level i
+                if cls_[i, j] == 1 or cls_[i, j] == 2:
                     start = pos[i, j]
-
-                    if level == 0:
+                    if i == 0:  # root to level 2
                         for k in range(len(pos[i+1])):
                             if cls_[i+1, k] != 0:
                                 end = pos[i+1, k]
@@ -76,9 +74,9 @@ class Tracing(object):
   
                     else:
                         if cls_[i, j] == 2:
-                            for k in range(2, start=begin):
+                            for k in range(begin, begin+2):
                                 begin += 1
-                                if k < len(pos[i+1])
+                                if k < len(pos[i+1]):
                                     if cls_[i+1, k] !=0:
                                         end = pos[i+1, k]
                                         indices, _ = route_through_array(weight_img, start, end, fully_connected=True, geometric=True)
@@ -98,7 +96,6 @@ class Tracing(object):
                                         elif cur[2] > 0.9 * imgshape[2]:
                                             tip_x_p.append(cur)
 
-            level += 1
         return tree, tip_z_m, tip_z_p, tip_y_m, tip_y_p, tip_x_m, tip_x_p
 
     # def trace_iter(self, img, seq, imgshape_model):

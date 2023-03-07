@@ -1,6 +1,6 @@
 #!/bin/bash
 
-exp_folder="exps/exp010"
+exp_folder="exps/exp012"
 mkdir -p $exp_folder
 
 
@@ -13,7 +13,7 @@ mkdir -p $exp_folder
 CUDA_VISIBLE_DEVICES=1 nohup \
 python -u train.py \
     --deterministic \
-    --loss_weight 1,10\
+    --loss_weight 1,20\
     --weight_decay 1e-4 \
     --max_epochs 300 \
     --save_folder ${exp_folder} \

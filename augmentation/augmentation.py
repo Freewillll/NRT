@@ -448,7 +448,7 @@ class RandomCrop(AbstractTransform):
                     soma_tag = False
                     new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
                     crop_tree = trim_out_of_box(new_tree, target_shape)
-                    if len(crop_tree) > 10:
+                    if len(crop_tree) > 20:
                         for line in crop_tree:
                             if line[-2] == -1:
                                 soma_tag = True
@@ -473,7 +473,7 @@ class RandomCrop(AbstractTransform):
                     new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
                     # check foreground existence
                     crop_tree = trim_out_of_box(new_tree, target_shape)
-                    if len(crop_tree) > 10:
+                    if len(crop_tree) > 20:
                         for line in crop_tree:
                             if line[-2] == -1:
                                 soma_tag = True
