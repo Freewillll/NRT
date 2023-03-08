@@ -1,7 +1,8 @@
 #!/bin/bash
 
-exp_folder="exps/exp013"
+exp_folder="exps/exp014"
 mkdir -p $exp_folder
+mkdir -p ${exp_folder}/debug
 
 
 #export NUM_NODES=1
@@ -15,7 +16,7 @@ python -u train.py \
     --deterministic \
     --weight_decay 1e-4 \
     --loss_weight 1,5 \
-    --max_epochs 400 \
+    --max_epochs 300 \
     --save_folder ${exp_folder} \
     --amp \
     --step_per_epoch 200 \

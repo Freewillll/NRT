@@ -139,30 +139,30 @@ class GenericDataset(tudata.Dataset):
             img = img[None]
 
 
-        if swcfile is not None and self.phase == 'test':
-            tree = parse_swc(swcfile)
-            img, tree = self.augment(img, tree)
-            tree_crop = trim_out_of_box(tree, img[0].shape, True)
-            seq_list = swc_to_forest(tree_crop, img[0].shape)
-            z, y, x, _ = seq_list[0][0][0]
-            start_node = [[z, y, x, 1]]
-            for i in range(self.seq_node_nums - len(start_node)):
-                node_pad = self.node_dim * [0]
-                node_pad[-1] = NODE_PAD
-                start_node.append(node_pad)
+        # if swcfile is not None and self.phase == 'test':
+        #     tree = parse_swc(swcfile)
+        #     img, tree = self.augment(img, tree)
+        #     tree_crop = trim_out_of_box(tree, img[0].shape, True)
+        #     seq_list = swc_to_forest(tree_crop, img[0].shape)
+        #     z, y, x, _ = seq_list[0][0][0]
+        #     start_node = [[z, y, x, 1]]
+        #     for i in range(self.seq_node_nums - len(start_node)):
+        #         node_pad = self.node_dim * [0]
+        #         node_pad[-1] = NODE_PAD
+        #         start_node.append(node_pad)
 
-            start_node = np.expand_dims(np.asarray(start_node), axis=0)
-            cls_ = start_node[..., -1].copy()
+        #     start_node = np.expand_dims(np.asarray(start_node), axis=0)
+        #     cls_ = start_node[..., -1].copy()
 
-            start_node = start_node.astype(np.float32)
-            for i in range(3):
-                start_node[..., i] = (start_node[..., i] - 0) / (img.shape[i+1] - 0 + 1e-8)
-            start_node[..., -1] = (start_node[..., -1] - NODE_PAD) / (EOS - NODE_PAD + 1e-8)
-            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(start_node.astype(np.float32)), torch.from_numpy(cls_.astype(np.int64)), imgfile, swcfile
+        #     start_node = start_node.astype(np.float32)
+        #     for i in range(3):
+        #         start_node[..., i] = (start_node[..., i] - 0) / (img.shape[i+1] - 0 + 1e-8)
+        #     start_node[..., -1] = (start_node[..., -1] - NODE_PAD) / (EOS - NODE_PAD + 1e-8)
+        #     return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(start_node.astype(np.float32)), torch.from_numpy(cls_.astype(np.int64)), imgfile, swcfile
 
 
 
-        if swcfile is not None and self.phase != 'test':
+        if swcfile is not None:
             tree = parse_swc(swcfile)
         else:
             tree = None
@@ -170,7 +170,7 @@ class GenericDataset(tudata.Dataset):
         # random augmentation
         img, tree = self.augment(img, tree)
 
-        if tree is not None and self.phase != 'test':
+        if tree is not None:
             tree_crop = trim_out_of_box(tree, img[0].shape, True)
             seq_list = swc_to_forest(tree_crop, img[0].shape)
 

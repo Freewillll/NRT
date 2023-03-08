@@ -140,9 +140,9 @@ def save_image_in_training(imgfiles, img, seq, cls_, pred, epoch, phase, idx):
         cls_ = rearrange(cls_, 'n nodes -> (n nodes)')
         img_lab = draw_seq(img, seq[idx].clone(), cls_, trg[..., :3])
         if phase == 'train':
-            out_lab_file = f'debug_epoch{epoch}_{prefix}_{phase}_lab.v3draw'
+            out_lab_file = f'debug/debug_epoch{epoch}_{prefix}_{phase}_lab.v3draw'
         else:
-            out_lab_file = f'debug_epoch{epoch}_{prefix}_{phase}_lab.v3draw'
+            out_lab_file = f'debug/debug_epoch{epoch}_{prefix}_{phase}_lab.v3draw'
             
         save_image(os.path.join(args.save_folder, out_lab_file), img_lab)
             
@@ -153,9 +153,9 @@ def save_image_in_training(imgfiles, img, seq, cls_, pred, epoch, phase, idx):
             img_pred = draw_seq(img, seq[idx].clone(), pred_cls, pred[..., :3])
 
             if phase == 'train':
-                out_pred_file = f'debug_epoch{epoch}_{prefix}_{phase}_pred.v3draw'
+                out_pred_file = f'debug/debug_epoch{epoch}_{prefix}_{phase}_pred.v3draw'
             else:
-                out_pred_file = f'debug_epoch{epoch}_{prefix}_{phase}_pred.v3draw'
+                out_pred_file = f'debug/debug_epoch{epoch}_{prefix}_{phase}_pred.v3draw'
 
             save_image(os.path.join(args.save_folder, out_pred_file), img_pred)
 
@@ -180,8 +180,10 @@ def get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes, loss_weight):
     cls_weight[cls_mask] = 10
     # b, n, nodes       remove pad and eos
     pos_mask = ((cls_ > 0) * (cls_ != 5)).unsqueeze(3).repeat(1, 1, 1, 3)
+    ignore_mask = cls_ < 0
     pos_weight = torch.ones(pos_mask.size(), dtype=pred.dtype, device=pred.device)
     pos_weight[pos_mask] = 10
+    pos_weight[ignore_mask] = 0
     accuracy_cls, accuracy_pos = util.accuracy_withmask(pred_cls_t.clone(), pred_pos.clone(), trg_cls.clone(), trg_pos.clone(), pos_mask.clone(), img.shape)
     # b, n, nodes, 3
     loss_ce, loss_box = (crit_ce(pred_cls_t, trg_cls) * cls_weight).mean(), (crit_box(pred_pos, trg_pos) * pos_weight).mean()

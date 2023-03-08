@@ -36,6 +36,16 @@ class Tracer(object):
             if type_ != 0 and type_ != EOS:
                 points.append((idx, type_, x, y, z, 1, p_idx))
         return points
+    
+    def test(self, img, seq, cls_, crit_ce, crit_box, model, nodes, loss_weight):
+        with torch.no_grad():
+            loss_ce, loss_box, loss, accuracy_cls, accuracy_pos, pred = get_forward(img, seq, cls_, crit_ce, crit_box, model, nodes, loss_weight)
+            print(f'loss_ce: {loss_ce}, loss_box: {loss_box}, accuracy_cls: {accuracy_cls}, accuracy_pos: {accuracy_pos}')
+            pos = util.pos_unnormalize(pred[..., :3], img.shape[2:])[0]
+            pred_cls = torch.argmax(pred[..., 3:], dim=-1)
+            print(pos)
+            print(pred_cls)
+            
 
     def trace_from_soma(self, img, seq, cls_):
         # pred: b, n, nodes, dims
@@ -215,9 +225,12 @@ if __name__ == '__main__':
         ddp_print(model)
         ddp_print('=' * 30 + '\n')
     model = model.to(args.device)
-    args.checkpoint = './exps/exp011/best_model.pt'
+    args.checkpoint = './exps/exp013/final_model.pt'
     checkpoint = torch.load(args.checkpoint, map_location='cuda:0')
     model.load_state_dict(checkpoint.state_dict())
+    
+    crit_ce = nn.CrossEntropyLoss(ignore_index=SEQ_PAD, reduction='none').to(args.device)
+    crit_box = nn.MSELoss(reduction='none').to(args.device)
 
     tracer = Tracer(model, 8, 10)
 
@@ -237,7 +250,8 @@ if __name__ == '__main__':
         print(cls_.shape)
         img_s = img[0].cpu().numpy()
         print(img_s.shape)
+        print(seq)
         save_image(f'./debug/debug_{i}.v3draw', img_s)
-        tree, *_ = tracer.trace_from_soma(img, seq, cls_)
-        write_swc(tree, f'./debug/debug_{i}.swc')
+        tracer.test(img, seq, cls_, crit_ce, crit_box, model, 10, [1, 5])
+        # write_swc(tree, f'./debug/debug_{i}.swc')
         break
