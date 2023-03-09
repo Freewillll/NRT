@@ -143,9 +143,9 @@ def save_image_in_training(imgfiles, img, seq, cls_, pred, epoch, phase, idx):
         cls_ = rearrange(cls_, 'n nodes -> (n nodes)')
         img_lab = draw_seq(img, seq[idx].clone(), cls_, trg[..., :3])
         if phase == 'train':
-            out_lab_file = f'debug_epoch{epoch}_{prefix}_{phase}_lab.v3draw'
+            out_lab_file = f'debug/debug_epoch{epoch}_{prefix}_{phase}_lab.v3draw'
         else:
-            out_lab_file = f'debug_epoch{epoch}_{prefix}_{phase}_lab.v3draw'
+            out_lab_file = f'debug/debug_epoch{epoch}_{prefix}_{phase}_lab.v3draw'
             
         save_image(os.path.join(args.save_folder, out_lab_file), img_lab)
             
@@ -156,9 +156,9 @@ def save_image_in_training(imgfiles, img, seq, cls_, pred, epoch, phase, idx):
             img_pred = draw_seq(img, seq[idx].clone(), pred_cls, pred[..., :3])
 
             if phase == 'train':
-                out_pred_file = f'debug_epoch{epoch}_{prefix}_{phase}_pred.v3draw'
+                out_pred_file = f'debug/debug_epoch{epoch}_{prefix}_{phase}_pred.v3draw'
             else:
-                out_pred_file = f'debug_epoch{epoch}_{prefix}_{phase}_pred.v3draw'
+                out_pred_file = f'debug/debug_epoch{epoch}_{prefix}_{phase}_pred.v3draw'
 
             save_image(os.path.join(args.save_folder, out_pred_file), img_pred)
 

@@ -1,7 +1,8 @@
 #!/bin/bash
 
-exp_folder="exps/exp012"
+exp_folder="exps/exp015"
 mkdir -p $exp_folder
+mkdir -p ${exp_folder}/debug
 
 
 #export NUM_NODES=1

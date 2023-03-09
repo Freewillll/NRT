@@ -145,7 +145,7 @@ class Attention(nn.Module):
             q = self.to_q(x)
             k = self.to_k(memory)
             v = self.to_v(memory)
-            q, k, v = map(lambda t: rearrange(q, 'b n (h d) -> b h n d', h=self.heads), (q, k, v))
+            q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), (q, k, v))
 
         #  q, k, v dim:  b, h, n, d
         dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
