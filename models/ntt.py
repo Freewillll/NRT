@@ -127,25 +127,18 @@ class Attention(nn.Module):
 
         self.attend = nn.Softmax(dim=-1)
 
-        self.to_q = nn.Linear(dim, inner_dim, bias=False)
-        self.to_k = nn.Linear(dim, inner_dim, bias=False)
-        self.to_v = nn.Linear(dim, inner_dim, bias=False)
+        self.to_q = nn.Linear(dim, inner_dim, bias=True)
+        self.to_k = nn.Linear(dim, inner_dim, bias=True)
+        self.to_v = nn.Linear(dim, inner_dim, bias=True)
 
         self.to_out = nn.Linear(inner_dim, dim, bias=False)
 
-    def forward(self, x, memory=None, attn_mask=None):
-        x = self.norm(x)
+    def forward(self, q, k, v, attn_mask=None):
 
-        if memory is None:
-            q = self.to_q(x)
-            k = self.to_k(x)
-            v = self.to_v(x)
-            q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), (q, k, v))
-        else:
-            q = self.to_q(x)
-            k = self.to_k(memory)
-            v = self.to_v(memory)
-            q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), (q, k, v))
+        q_s = self.to_q(q)
+        k_s = self.to_k(k)
+        v_s = self.to_v(v)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), (q_s, k_s, v_s))
 
         #  q, k, v dim:  b, h, n, d
         dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
@@ -173,7 +166,7 @@ class Encoderlayer(nn.Module):
 
     def forward(self, x):
         for attn, ff in self.layers:
-            x = attn(x) + x
+            x = attn(x,x,x) + x
             x = ff(x) + x
         return x
 
@@ -191,8 +184,8 @@ class Decoderlayer(nn.Module):
 
     def forward(self, x, memory, attn_mask):
         for self_attn, enc_attn, ff in self.layers:
-            x = self_attn(x, attn_mask=attn_mask) + x
-            x = enc_attn(x, memory=memory) + x
+            x = self_attn(x, x, x, attn_mask=attn_mask) + x
+            x = enc_attn(x, memory, memory) + x
             x = ff(x) + x
         return x
 
@@ -275,7 +268,7 @@ class NTT(nn.Module):
         )
 
         in_channels = base_num_filters
-        out_channels = base_num_filters
+        out_channels = 2 * base_num_filters
         down_filters = []
         self.down_d = 1
         self.down_h = 1
@@ -289,8 +282,8 @@ class NTT(nn.Module):
             down_filters.append((in_channels, out_channels))
             down = ResidualBlock(in_channels, out_channels, kernel=down_kernel, stride=stride)
             self.downs.append(down)
-            down = ResidualBlock(out_channels, out_channels, kernel=down_kernel, stride=stride)
-            self.downs.append(down)
+            # down = ResidualBlock(out_channels, out_channels, kernel=down_kernel, stride=stride)
+            # self.downs.append(down)
             in_channels = out_channels
             out_channels = out_channels * 2
 
@@ -347,12 +340,12 @@ if __name__ == '__main__':
     print('Initialize model...')
 
     img = torch.randn(2, 1, 32, 64, 64)
-    seq = torch.randn(2, 10, 8, 4)
+    seq = torch.randn(2, 10, 10, 4)
     model = NTT(**configs)
-    print(model)
+    # print(model)
     outputs = model(img, seq)
 
     for output in outputs:
         print('output size: ', output.size())
 
-    summary(model, input_size=[(2, 1, 32, 64, 64), (2, 10, 8, 4)])
+    summary(model, input_size=[(2, 1, 32, 64, 64), (2, 10, 10, 4)])
