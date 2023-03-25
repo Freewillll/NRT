@@ -1,6 +1,6 @@
 #!/bin/bash
 
-exp_folder="exps/debug_12"
+exp_folder="exps/debug_13"
 mkdir -p $exp_folder
 # mkdir -p ${exp_folder}/debug
 

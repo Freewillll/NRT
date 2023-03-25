@@ -351,7 +351,7 @@ class NTT(nn.Module):
         memory = self.encoder(img)
         output = self.decoder(x, memory, self.embed.weight)
         output_class = self.class_head(output)
-        output_pos = self.pos_head(output)
+        output_pos = self.pos_head(output).sigmoid()
         # output_class = rearrange(output_class, 'b n (nodes d) -> b (n nodes) d', nodes=self.num_nodes)
         # output_pos = rearrange(output_pos, 'b n (nodes d) -> b (n nodes) d', nodes=self.num_nodes)
         out = {'pred_logits': output_class, 'pred_poses': output_pos}
