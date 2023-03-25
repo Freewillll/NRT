@@ -102,6 +102,20 @@ class ResidualBlock(nn.Module):
         return out
 
 
+class MLP(nn.Module):
+
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
+        super().__init__()
+        self.num_layers = num_layers
+        h = [hidden_dim] * (num_layers - 1)
+        self.layers = nn.ModuleList(nn.Linear(n, k) for n, k in zip([input_dim] + h, h + [output_dim]))
+
+    def forward(self, x):
+        for i, layer in enumerate(self.layers):
+            x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
+        return x
+
+
 class FeedForward(nn.Module):
     def __init__(self, dim, hidden_dim):
         super().__init__()
@@ -127,25 +141,18 @@ class Attention(nn.Module):
 
         self.attend = nn.Softmax(dim=-1)
 
-        self.to_q = nn.Linear(dim, inner_dim, bias=False)
-        self.to_k = nn.Linear(dim, inner_dim, bias=False)
-        self.to_v = nn.Linear(dim, inner_dim, bias=False)
+        self.to_q = nn.Linear(dim, inner_dim, bias=True)
+        self.to_k = nn.Linear(dim, inner_dim, bias=True)
+        self.to_v = nn.Linear(dim, inner_dim, bias=True)
 
         self.to_out = nn.Linear(inner_dim, dim, bias=False)
 
-    def forward(self, x, memory=None, attn_mask=None):
-        x = self.norm(x)
+    def forward(self, q, k, v, attn_mask=None):
 
-        if memory is None:
-            q = self.to_q(x)
-            k = self.to_k(x)
-            v = self.to_v(x)
-            q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), (q, k, v))
-        else:
-            q = self.to_q(x)
-            k = self.to_k(memory)
-            v = self.to_v(memory)
-            q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), (q, k, v))
+        q_s = self.to_q(q)
+        k_s = self.to_k(k)
+        v_s = self.to_v(v)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), (q_s, k_s, v_s))
 
         #  q, k, v dim:  b, h, n, d
         dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
@@ -165,6 +172,7 @@ class Encoderlayer(nn.Module):
     def __init__(self, dim, depth, heads, dim_head, mlp_dim):
         super().__init__()
         self.layers = nn.ModuleList([])
+        self.norm = nn.LayerNorm(dim)
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
                 Attention(dim, heads = heads, dim_head = dim_head),
@@ -172,8 +180,9 @@ class Encoderlayer(nn.Module):
             ]))
 
     def forward(self, x):
+        x = self.norm(x)
         for attn, ff in self.layers:
-            x = attn(x) + x
+            x = attn(x, x, x) + x
             x = ff(x) + x
         return x
 
@@ -182,6 +191,7 @@ class Decoderlayer(nn.Module):
     def __init__(self, dim, depth, heads, dim_head, mlp_dim):
         super().__init__()
         self.layers = nn.ModuleList([])
+        self.norm = nn.LayerNorm(dim)
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
                 Attention(dim, heads=heads, dim_head=dim_head),
@@ -189,10 +199,12 @@ class Decoderlayer(nn.Module):
                 FeedForward(dim, mlp_dim)
             ]))
 
-    def forward(self, x, memory, attn_mask):
+    def forward(self, x, memory, attn_mask=None):
+        x = self.norm(x)
+        memory = self.norm(memory)
         for self_attn, enc_attn, ff in self.layers:
-            x = self_attn(x, attn_mask=attn_mask) + x
-            x = enc_attn(x, memory=memory) + x
+            x = self_attn(x, x, x, attn_mask=attn_mask) + x
+            x = enc_attn(x, memory, memory) + x
             x = ff(x) + x
         return x
 
@@ -219,6 +231,7 @@ class Encoder(nn.Module):
         self.norm = nn.LayerNorm(dim)
 
     def forward(self, img):
+        # print(img.shape)
         x = self.to_patch_embedding(img)
         pe = posemb_sincos_3d(x)
         x = rearrange(x, 'b ... d -> b (...) d') + pe
@@ -239,25 +252,26 @@ class Decoder(nn.Module):
         self.heads = heads
         self.layers = Decoderlayer(dim, depth, heads, dim_head, mlp_dim)
 
-    def forward(self, x, memory):
+    def forward(self, x, memory, query_embed):
         # shape of x:   b, seq_len, seq_item_len, vec_len
         # x : start, item1, item2, ...
-        mask_input = x[:, :, 0, -1] > 0
-        attn_pad_mask = get_attn_pad_mask(mask_input, mask_input)
-        attn_subsequent_mask = get_attn_subsequent_mask(mask_input)
+        # mask_input = x[:, :, 0, -1] > 0
+        # attn_pad_mask = get_attn_pad_mask(mask_input, mask_input)
+        # attn_subsequent_mask = get_attn_subsequent_mask(mask_input)
 
-        attn_mask = torch.gt((attn_pad_mask + attn_subsequent_mask), 0)
-        attn_mask = attn_mask.unsqueeze(1).repeat(1, self.heads, 1, 1)   # b, h, n, n
+        # attn_mask = torch.gt((attn_pad_mask + attn_subsequent_mask), 0)
+        # attn_mask = attn_mask.unsqueeze(1).repeat(1, self.heads, 1, 1)   # b, h, n, n
 
-        # -> b, n, d
-        x = rearrange(x, 'b n ...  -> b n (...)')
-        # b, dim  ->  b, n, dim
+        # x = rearrange(x, 'b n ...  -> b n (...)')
+        # b, dim  ->  b, dim
         memory = memory.unsqueeze(1).repeat(1, x.shape[1], 1) 
-        # b, n, d
+        # b, d
         x = self.embedding(x)
-        pe = posemb_sincos_1d(x)
-        x += pe
-        x = self.layers(x, memory, attn_mask)
+        x = x + query_embed
+        # pe = posemb_sincos_1d(memory)
+        # x += pe
+        # memory += pe
+        x = self.layers(x, memory)
         return x
 
 
@@ -267,6 +281,7 @@ class NTT(nn.Module):
         super(NTT, self).__init__()
         assert len(down_kernel_list) == len(stride_list)
         self.downs = []
+        self.num_nodes = num_nodes
 
         # the first layer to process the input image
         self.pre_layer = nn.Sequential(
@@ -289,7 +304,7 @@ class NTT(nn.Module):
             down_filters.append((in_channels, out_channels))
             down = ResidualBlock(in_channels, out_channels, kernel=down_kernel, stride=stride)
             self.downs.append(down)
-            down = ResidualBlock(out_channels, out_channels, kernel=down_kernel, stride=stride)
+            down = ResidualBlock(out_channels, out_channels, kernel=[3,3,3], stride=[1,1,1])
             self.downs.append(down)
             in_channels = out_channels
             out_channels = out_channels * 2
@@ -299,6 +314,8 @@ class NTT(nn.Module):
         d = int(d / self.down_d)
         h = int(h / self.down_h)
         w = int(w / self.down_w)
+        
+        self.embed = nn.Embedding(num_nodes, dim)
 
         self.encoder = Encoder(
             image_size=(d, w, h),
@@ -312,7 +329,7 @@ class NTT(nn.Module):
         )
 
         self.decoder = Decoder(
-            input_dim=num_nodes * (pos_dims + 1),
+            input_dim=pos_dims,
             dim=dim,
             depth=depth,
             heads=heads,
@@ -321,10 +338,8 @@ class NTT(nn.Module):
         )
         # convert layers to nn containers
         self.downs = nn.ModuleList(self.downs)
-        self.proj = nn.Sequential(
-            nn.LayerNorm(dim),
-            nn.Linear(dim, num_nodes * (pos_dims + num_classes))
-        )
+        self.class_head = nn.Linear(dim, num_classes)
+        self.pos_head = MLP(dim, dim, 3, 3)
 
     def forward(self, img, x):
         assert img.ndim == 5
@@ -332,10 +347,15 @@ class NTT(nn.Module):
         ndown = len(self.downs)
         for i in range(ndown):
             img = self.downs[i](img)
+        x = x.unsqueeze(1).repeat(1, self.num_nodes, 1)
         memory = self.encoder(img)
-        output = self.decoder(x, memory)
-        output = self.proj(output)
-        return output
+        output = self.decoder(x, memory, self.embed.weight)
+        output_class = self.class_head(output)
+        output_pos = self.pos_head(output)
+        # output_class = rearrange(output_class, 'b n (nodes d) -> b (n nodes) d', nodes=self.num_nodes)
+        # output_pos = rearrange(output_pos, 'b n (nodes d) -> b (n nodes) d', nodes=self.num_nodes)
+        out = {'pred_logits': output_class, 'pred_poses': output_pos}
+        return out
 
 
 if __name__ == '__main__':
@@ -347,12 +367,10 @@ if __name__ == '__main__':
     print('Initialize model...')
 
     img = torch.randn(2, 1, 32, 64, 64)
-    seq = torch.randn(2, 10, 2, 4)
+    node = torch.randn(2, 3)
     model = NTT(**configs)
     print(model)
-    outputs = model(img, seq)
+    outputs = model(img, node)
+    print(outputs)
 
-    for output in outputs:
-        print('output size: ', output.size())
-
-    summary(model, input_size=[(2, 1, 32, 64, 64), (2, 10, 2, 4)])
+    summary(model, input_size=[(2, 1, 32, 64, 64), (2, 3)])

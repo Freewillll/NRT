@@ -23,13 +23,16 @@ sys.path.append(parent)
 from utils.image_util import normalize_normal
 
 
-def load_data(data_dir, img_shape=[128, 256, 256], is_train=True):
+def load_data(data_dir, img_shape=[128, 256, 256], is_train=True, nums_data=1):
 
     # load the spacing file
     img_dir = os.path.join(data_dir, 'img', str(img_shape[1]), 'raw')
     # get all annotated data
+    nums = 0
     data_list = []
     for img_file in glob.glob(os.path.join(img_dir, '*.v3draw')):
+        if nums >= nums_data:
+            break
         swc_dir = os.path.join(data_dir, 'swc', str(img_shape[1]), 'final')
         prefix = get_file_prefix(img_file)
         if is_train:
@@ -37,6 +40,7 @@ def load_data(data_dir, img_shape=[128, 256, 256], is_train=True):
         else:
             swc_file = None
         data_list.append((img_file, swc_file, img_shape))
+        nums += 1
 
     return data_list
 
@@ -75,10 +79,10 @@ class GenericPreprocessor(object):
             # with open(swcfile_out, 'wb') as fp:
             #    pickle.dump(tree, fp)
 
-    def run(self, data_dir, output_dir, img_shape=[128, 256, 256], is_train=True, num_threads=8):
+    def run(self, data_dir, output_dir, img_shape=[128, 256, 256], is_train=True, num_threads=8, nums_data=8):
         print('Processing for dataset, should be run at least once for each dataset!')
         # get all files
-        data_list = load_data(data_dir, img_shape, is_train=is_train)
+        data_list = load_data(data_dir, img_shape, is_train=is_train, nums_data=nums_data)
         print(f'Total number of samples found: {len(data_list)}')
 
         maybe_mkdir_p(output_dir)
@@ -131,9 +135,9 @@ class GenericPreprocessor(object):
 
 if __name__ == '__main__':
     data_dir = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/dataset'
-    output_dir = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task002_ntt_256'
+    output_dir = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task004_ntt_debug'
     is_train = True
     num_threads = 16
     gp = GenericPreprocessor()
-    gp.run(data_dir, output_dir, img_shape=[128, 256, 256], is_train=is_train, num_threads=num_threads)
+    gp.run(data_dir, output_dir, img_shape=[128, 256, 256], is_train=is_train, num_threads=num_threads, nums_data=10)
     gp.dataset_split(output_dir, val_ratio=0.1, test_ratio=0.1, seed=1024, img_ext='.npz', lab_ext='.swc')

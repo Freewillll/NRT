@@ -1,7 +1,7 @@
 import numpy as np
 from treelib import Tree
 from collections import defaultdict
-from swc_handler import parse_swc, write_swc, get_child_dict
+from swc_handler import parse_swc, write_swc, get_child_dict, get_index_dict
 
 
 def is_in_box(x, y, z, imgshape):
@@ -115,8 +115,14 @@ def swc_to_forest(tree, imgshape, max_level=1, p_idx=-2):
                 seq_item = []
                 if key <= max_level:
                     for idx in level_dict[key]:
+                        pos = []
                         node = tree.get_node(idx)
-                        pos = np.clip(list(node.data), [0,0,0], [i -1 for i in imgshape])
+                        if node.tag == 4:
+                            par = node._predecessor[node._initial_tree_id]
+                            par_node = tree.get_node(par)
+                            pos = par_node.data
+                        else:
+                            pos = node.data
                         seq_item.append(list(pos) + [node.tag])
                     seq.append(seq_item)
             seq_list.append(seq)
@@ -141,7 +147,7 @@ if __name__ == '__main__':
     tree = trim_out_of_box(new_tree, imgshape=[32, 64, 64])
     print(len(tree))
     seq_list = swc_to_forest(tree, imgshape=[32,64,64])
-    print(seq_list)
+    # print(seq_list)
     print(seq_list[0])
 
 
