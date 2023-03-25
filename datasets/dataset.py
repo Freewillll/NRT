@@ -14,7 +14,7 @@ sys.path.append(parent)
 
 from swc_handler import parse_swc, write_swc
 from augmentation.augmentation import InstanceAugmentation
-from datasets.swc_processing import trim_out_of_box, swc_to_forest
+from datasets.swc_processing import trim_out_of_box, swc_to_points
 
 # To avoid the recursionlimit error
 sys.setrecursionlimit(30000)
@@ -31,20 +31,16 @@ def collate_fn(batch):
     
     output_target = []
     output_img = []
-    output_input_node = []
     output_imgfile = []
     output_swcfile = []
     for data in batch:
-
-        output_target.append(data[2])
+        output_target.append(data[1])
         output_img.append(data[0].tolist())
-        output_input_node.append(data[1].tolist())
         output_imgfile.append(data[-2])
         output_swcfile.append(data[-1])
 
     output_img = torch.tensor(output_img, dtype=torch.float32)
-    output_input_node = torch.tensor(output_input_node, dtype=torch.float32)
-    return output_img, output_input_node, output_target, output_imgfile, output_swcfile
+    return output_img, output_target, output_imgfile, output_swcfile
 
 
 def draw_lab(lab, cls_, img):
@@ -102,13 +98,13 @@ class GenericDataset(tudata.Dataset):
             raise ValueError
 
     def __getitem__(self, index):
-        img, input_node, target, imgfile, swcfile = self.pull_item(index)
-        return img, input_node, target, imgfile, swcfile
+        img, target, imgfile, swcfile = self.pull_item(index)
+        return img, target, imgfile, swcfile
 
     def __len__(self):
         return len(self.data_list)
 
-    def pull_item(self, index):
+    def pull_item(self, index, num_nodes=110):
         imgfile, swcfile = self.data_list[index]
         # parse, image should in [c,z,y,x] format
 
@@ -116,26 +112,6 @@ class GenericDataset(tudata.Dataset):
 
         if img.ndim == 3:
             img = img[None]
-
-        if swcfile is not None and self.phase == 'test':
-            tree = parse_swc(swcfile)
-            img, tree = self.augment(img, tree)
-            _, _, x, y, z, *_ = tree[0]
-            start_node = [[z, y, x, 1]]
-            for i in range(self.seq_node_nums - len(start_node)):
-                node_pad = self.node_dim * [0]
-                node_pad[-1] = NODE_PAD
-                start_node.append(node_pad)
-
-            start_node = np.asarray(start_node)
-            cls_ = start_node[..., -1].copy()
-
-            start_node = start_node.astype(np.float32)
-            for i in range(3):
-                start_node[..., i] = (start_node[..., i] - 0) / (img.shape[i+1] - 0 + 1e-8)
-            start_node[..., -1] = (start_node[..., -1] - NODE_PAD) / (EOS - NODE_PAD + 1e-8)
-            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(start_node.astype(np.float32)), torch.from_numpy(cls_.astype(np.int64)), imgfile, swcfile
-
 
         if swcfile is not None and self.phase != 'test':
             tree = parse_swc(swcfile)
@@ -145,35 +121,12 @@ class GenericDataset(tudata.Dataset):
 
         if tree is not None and self.phase != 'test':
             tree_crop = trim_out_of_box(tree, img[0].shape, True)
-            seq_list = swc_to_forest(tree_crop, img[0].shape)
+            poses, labels = swc_to_points(tree_crop, img[0].shape)
+            poses = poses[:num_nodes]
+            labels = labels[:num_nodes]
 
-            # pad the seq_item 
-            # find the seq has max len
-            maxlen_idx = 0         
-            maxlen = 0
-
-            for idx, seq in enumerate(seq_list):
-                if maxlen < len(seq):
-                    maxlen = len(seq)
-                    maxlen_idx = idx
-                for seq_item in seq:
-                    if len(seq_item) > self.seq_node_nums:
-                        for i in range(len(seq_item) - self.seq_node_nums):
-                            seq_item.pop()
-
-            # find a seq the lenght of which is in range
-            # seq: l, nodes, dim
-            input_node = np.asarray(seq_list[maxlen_idx][0][0][:3]).astype(np.float32)
-            target_seq = np.asarray(seq_list[maxlen_idx][1]).astype(np.float32)
-            #normailize
-            for i in range(3):
-                input_node[..., i] = (input_node[..., i] - 0) / (img.shape[i+1] - 0 + 1e-8)
-                target_seq[..., i] = (target_seq[..., i] - 0) / (img.shape[i+1] - 0 + 1e-8)
-            input_node = torch.from_numpy(input_node.astype(np.float32))
-            pos = torch.from_numpy(target_seq[..., :3].astype(np.float32))
-            lab = torch.from_numpy(target_seq[..., -1].astype(np.int64))
-            target = {'poses': pos, 'labels': lab}
-            return torch.from_numpy(img.astype(np.float32)), input_node, target, imgfile, swcfile
+            target = {'poses': torch.tensor(poses, dtype=torch.float32), 'labels': torch.tensor(labels, dtype=torch.int64)}
+            return torch.from_numpy(img.astype(np.float32)), target, imgfile, swcfile
         else:
             lab = np.random.randn((2, self.seq_node_nums, self.node_dim)) > 0.5
             cls_ = np.random.randn((2, self.seq_node_nums)) > 0.5
@@ -194,7 +147,7 @@ if __name__ == '__main__':
 
     split_file = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task002_ntt_256/data_splits.pkl'
     idx = 1
-    imgshape = (32, 64, 64)
+    imgshape = (64, 128, 128)
     dataset = GenericDataset(split_file, 'train', imgshape=imgshape)
 
     loader = tudata.DataLoader(dataset, 4, 
@@ -204,14 +157,14 @@ if __name__ == '__main__':
                                 collate_fn=collate_fn,
                                 worker_init_fn=util.worker_init_fn)
     for i, batch in enumerate(loader):
-        img, input_node, targets , imgfiles, swcfile = batch
-        print(f'input: {input_node}')
-        print(input_node.shape)
+        img, targets , imgfiles, swcfile = batch
         print(f'targets: {targets}')
+        for v in targets:
+            print(len(v['labels']))
         print(imgfiles)
         # print(targets.shape)
         # save_image_in_training(imgfiles, img, seq, cls_, pred=None, phase='train', epoch=1, idx=0)
-        break
+
         
 
 
