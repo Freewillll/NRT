@@ -73,13 +73,11 @@ def draw_lab(lab, cls_, img):
 
 class GenericDataset(tudata.Dataset):
 
-    def __init__(self, split_file, phase='train', imgshape=(32, 64, 64), seq_node_nums=2, node_dim=4):
+    def __init__(self, split_file, phase='train', imgshape=(32, 64, 64)):
         self.data_list = self.load_data_list(split_file, phase)
         self.imgshape = imgshape
         print(f'Image shape of {phase}: {imgshape}')
         self.phase = phase
-        self.seq_node_nums = seq_node_nums
-        self.node_dim = node_dim
         self.augment = InstanceAugmentation(p=0.2, imgshape=imgshape, phase=phase)
 
     @staticmethod
@@ -104,7 +102,7 @@ class GenericDataset(tudata.Dataset):
     def __len__(self):
         return len(self.data_list)
 
-    def pull_item(self, index, num_nodes=110):
+    def pull_item(self, index, num_nodes=100):
         imgfile, swcfile = self.data_list[index]
         # parse, image should in [c,z,y,x] format
 

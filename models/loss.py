@@ -46,6 +46,7 @@ class SetCriterion(nn.Module):
         self.empty_weight_d = self.empty_weight.to(src_logits.device)
         
         loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight_d)
+        
         losses = {'loss_ce': loss_ce}
         return losses
 

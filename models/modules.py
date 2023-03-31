@@ -19,10 +19,10 @@ class ConvDropoutNormNonlin(nn.Module):
                  conv_op=nn.Conv3d, conv_kwargs=None,
                  norm_op=nn.InstanceNorm3d, norm_op_kwargs=None,
                  dropout_op=nn.Dropout3d, dropout_op_kwargs=None,
-                 nonlin=nn.ELU, nonlin_kwargs=None):
+                 nonlin=nn.LeakyReLU, nonlin_kwargs=None):
         super(ConvDropoutNormNonlin, self).__init__()
         if nonlin_kwargs is None:
-            nonlin_kwargs = {'alpha': 0.2, 'inplace': True}
+            nonlin_kwargs = {'inplace': True}
         if dropout_op_kwargs is None:
             dropout_op_kwargs = {'p': 0.0, 'inplace': True}
         if norm_op_kwargs is None:

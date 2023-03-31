@@ -443,18 +443,11 @@ class RandomCrop(AbstractTransform):
             target_shape = self.imgshape
             if self.force_fg_sampling:
                 num_trail = 0
-                soma_tag = False
                 while num_trail < 200:
-                    soma_tag = False
                     new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
                     crop_tree = trim_out_of_box(new_tree, target_shape)
                     if len(crop_tree) > 20:
-                        for line in crop_tree:
-                            if line[-2] == -1:
-                                soma_tag = True
-                                break
-                        if not soma_tag:
-                            break
+                        break
                     num_trail += 1
                 else:
                     print("No foreground found after random crops!")
@@ -466,20 +459,13 @@ class RandomCrop(AbstractTransform):
         else:
             if self.force_fg_sampling:
                 num_trail = 0
-                soma_tag = False
                 while num_trail < 200:
-                    soma_tag = False
                     shape, target_shape = get_random_shape(self.imgshape, self.crop_range, self.per_axis)
                     new_img, new_tree = random_crop_image_4D(img, tree, target_shape)
                     # check foreground existence
                     crop_tree = trim_out_of_box(new_tree, target_shape)
                     if len(crop_tree) > 20:
-                        for line in crop_tree:
-                            if line[-2] == -1:
-                                soma_tag = True
-                                break
-                        if not soma_tag:
-                            break
+                        break
                     num_trail += 1
                 else:
                     print("No foreground found after random crops!")
@@ -524,9 +510,9 @@ class CenterCrop(AbstractTransform):
         super(CenterCrop, self).__init__(p)
         self.reference_shape = reference_shape
 
-    def __call__(self, img, gt=None):
+    def __call__(self, img, tree=None):
         if np.random.random() > self.p:
-            return img, gt
+            return img, tree
 
         shape = np.array(img[0].shape)
         target_shape = np.array(self.reference_shape)
@@ -534,12 +520,18 @@ class CenterCrop(AbstractTransform):
         sz, sy, sx = (shape - target_shape) // 2
         img = img[:, sz:sz + target_shape[0], sy:sy + target_shape[1], sx:sx + target_shape[2]]
 
-        if gt is not None:
-            gt = gt[:, sz:sz + target_shape[0], sy:sy + target_shape[1], sx:sx + target_shape[2]]
+        if tree is not None:
+            new_tree = []
+            for leaf in tree:
+                idx, type_, x, y, z, r, p = leaf
+                x = x - sx
+                y = y - sy
+                z = z - sz
+                new_tree.append((idx, type_, x, y, z, r, p))
 
-            return img, gt
+            return img, new_tree
         else:
-            return img, gt
+            return img, tree
 
 
 # NOTE: not verified, take care!
@@ -603,6 +595,7 @@ class InstanceAugmentation(object):
         if phase == 'train':
             self.augment = Compose([
                 ConvertToFloat(),
+                # CenterCrop(1.0, imgshape),
                 RandomCrop(1.0, imgshape, crop_range=(1.0, 1.2), force_fg_sampling=True),
                 RandomGammaTransformDualModes(p=p, gamma_range=(0.7, 1.4), per_channel=False, retain_stats=False),
                 RandomGaussianNoise(p=p),

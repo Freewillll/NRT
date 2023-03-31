@@ -58,10 +58,6 @@ parser.add_argument('--momentum', default=0.99, type=float,
                     help='Momentum value for optim')
 parser.add_argument('--weight_decay', default=0, type=float,
                     help='Weight decay')
-parser.add_argument('--decay_type', choices=['cosine', 'linear'], default='cosine', type=str,
-                    help='How to decay the learning rate')
-parser.add_argument('--warmup_steps', default=500, type=int,
-                    help='Step of training to perform learning rate warmup for')
 parser.add_argument('--max_grad_norm', default=1.0, type=float,
                     help='Max gradient norm.')
 parser.add_argument('--num_classes', default=5, type=int,
@@ -80,6 +76,10 @@ parser.add_argument('--max_epochs', default=200, type=int,
                     help='maximal number of epochs')
 parser.add_argument('--step_per_epoch', default=200, type=int,
                     help='step per epoch')
+parser.add_argument('--lr_drop', default=200, type=int,
+                    help=' lr drop')
+parser.add_argument('--warmup_steps', default=200, type=int,
+                    help=' warm up steps')
 parser.add_argument('--deterministic', action='store_true',
                     help='run in deterministic mode')
 parser.add_argument('--test_frequency', default=20, type=int,
@@ -111,9 +111,8 @@ def ddp_print(content):
         print(content)
 
 
-def draw_seq(img, input_node, pos, labels):
+def draw_seq(img, pos, labels):
     # img: c, z, y, x
-    # input node, 
     # pos: n, 3
     # cls: n
     img = np.repeat(img, 3, axis=0)
@@ -121,16 +120,14 @@ def draw_seq(img, input_node, pos, labels):
     img[2, :, :, :] = 0
     # keep the position of nodes in the range of imgshape
     # print(seq.shape, pos.shape, cls_.shape, img.shape)
-    print(pos)
-    print(labels)
+    # print(pos)
+    # print(labels)
     nodes = pos.cpu().numpy().copy()
-    start = np.clip(util.pos_unnormalize(input_node.cpu().numpy(), img.shape[1:]), [0,0,0], [i -1 for i in img.shape[1:]]).astype(int)
     nodes = np.clip(util.pos_unnormalize(nodes, img.shape[1:]), [0,0,0], [i -1 for i in img.shape[1:]]).astype(int)
 
     # draw nodes
-    img[:, start[0], start[1], start[2]] = 255  # start point white
     for idx, node in enumerate(nodes):
-        if labels[idx] == 1: # root white
+        if labels[idx] == 1: # soma white
             img[:, node[0], node[1], node[2]] = 255
         elif labels[idx] == 2: # branching point yellow
             img[0, node[0], node[1], node[2]] = 255
@@ -144,9 +141,8 @@ def draw_seq(img, input_node, pos, labels):
     return img
 
 
-def save_image_in_training(imgfiles, img, input_node, targets, pred, epoch, phase, idx):  
+def save_image_in_training(imgfiles, img, targets, pred, epoch, phase, idx):  
     # the shape of image: b, c, z, y, x
-    # input_nodes: b, n, 3
     # targets: {'labels', 'poses'}   
     # pred: {'pred_logits', 'pred_poses'}  logtis: b, n, 5  poses: b, n, 3
     
@@ -155,11 +151,10 @@ def save_image_in_training(imgfiles, img, input_node, targets, pred, epoch, phas
     with torch.no_grad():
         img = (unnormalize_normal(img[idx].numpy())).astype(np.uint8)
         # -> n, nodes, dim
-        start_node = input_node[idx].clone()
         tgt_cls = targets[idx]['labels'].clone()
         tgt_pos = targets[idx]['poses'].clone()
         
-        img_lab = draw_seq(img, start_node, tgt_pos, tgt_cls)
+        img_lab = draw_seq(img, tgt_pos, tgt_cls)
         
         if phase == 'train':
             out_lab_file = f'debug_epoch{epoch}_{prefix}_{phase}_lab.v3draw'
@@ -169,11 +164,10 @@ def save_image_in_training(imgfiles, img, input_node, targets, pred, epoch, phas
         save_image(os.path.join(args.save_folder, out_lab_file), img_lab)
             
         if pred != None:
-            start_node_t = input_node[idx].clone()
             pred_cls = torch.argmax(pred['pred_logits'][idx], dim=-1)
             pred_pos = pred['pred_poses'][idx].clone()
             
-            img_pred = draw_seq(img, start_node_t, pred_pos, pred_cls)
+            img_pred = draw_seq(img, pred_pos, pred_cls)
 
             if phase == 'train':
                 out_pred_file = f'debug_epoch{epoch}_{prefix}_{phase}_pred.v3draw'
@@ -189,26 +183,38 @@ def validate(model, criterion ,val_loader, weight_dict, epoch, debug=True, num_i
     loss_all = 0
     if num_image_save == -1:
         num_image_save = 9999
+        
+    loss_ce = 0
+    loss_pos = 0
 
     processed = 0
-    for img, input_node, targets, imgfiles, swcfiles in val_loader:
+    for img, targets, imgfiles, swcfiles in val_loader:
         processed += 1
 
         img_d = img.to(args.device)
-        input_node_d = input_node.to(args.device)
         targets_d = [{'labels': v['labels'].to(args.device), 'poses': v['poses'].to(args.device)} for v in targets]
         
         if args.amp:
             with autocast():
                 with torch.no_grad():
-                    pred = model(img_d, input_node_d)
+                    pred = model(img_d)
         
                     loss_dict = criterion(pred, targets_d)
+                    loss_ce += loss_dict['loss_ce']
+                    loss_pos += loss_dict['loss_pos']
                     losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)        
-                    loss_all += losses      
+                    loss_all += losses  
+        else:
+            with torch.no_grad():
+                pred = model(img_d)
+                loss_dict = criterion(pred, targets_d)
+                loss_ce += loss_dict['loss_ce']
+                loss_pos += loss_dict['loss_pos']
+                losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)        
+                loss_all += losses  
+                
 
         del img_d
-        del input_node_d
         del targets_d
 
         if debug:
@@ -216,14 +222,16 @@ def validate(model, criterion ,val_loader, weight_dict, epoch, debug=True, num_i
                 num_saved += 1
                 if num_saved > num_image_save:
                     break
-                save_image_in_training(imgfiles, img, input_node, targets, pred, epoch, phase, debug_idx)
-                
+                save_image_in_training(imgfiles, img, targets, pred, epoch, phase, debug_idx)
+    
+    loss_ce_mean = loss_ce / processed
+    loss_pos_mean = loss_pos / processed            
     loss_mean = loss_all / processed
-    return loss_mean
+    return loss_ce_mean.item(), loss_pos_mean.item(), loss_mean.item()
 
 
 def load_dataset(phase, imgshape):
-    dset = GenericDataset(args.data_file, phase=phase, imgshape=imgshape, seq_node_nums=args.num_item_nodes, node_dim=args.node_dim)
+    dset = GenericDataset(args.data_file, phase=phase, imgshape=imgshape)
     ddp_print(f'Number of {phase} samples: {len(dset)}')
     # distributedSampler
     if phase == 'train':
@@ -242,24 +250,21 @@ def load_dataset(phase, imgshape):
     return loader, dset_iter
 
 
-def evaluate(model, optimizer, crit_ce, crit_box, imgshape, phase, loss_weight):
+def evaluate(model, optimizer, imgshape, phase):
     val_loader, val_iter = load_dataset(phase, imgshape)
     args.curr_epoch = 0
-    loss_ce, loss_dice, *_ = validate(model, val_loader, crit_ce, crit_box, loss_weight, epoch=0, debug=True, num_image_save=-1,
+    loss_ce, loss_dice, *_ = validate(model, val_loader, epoch=0, debug=True, num_image_save=-1,
                                         phase=phase)
     ddp_print(f'Average loss_ce and loss_dice: {loss_ce:.5f} {loss_dice:.5f}')
 
 
-def train(model, optimizer, crit_ce, crit_box, imgshape, loss_weight):
+def train(model, optimizer, imgshape):
     # dataset preparing
     train_loader, train_iter = load_dataset('train', imgshape)
     # val_loader, val_iter = load_dataset('val', imgshape)
     args.step_per_epoch = len(train_loader) if len(train_loader) < args.step_per_epoch else args.step_per_epoch
     t_total = args.max_epochs * args.step_per_epoch
-    if args.decay_type == "cosine":
-        scheduler = util.WarmupCosineSchedule(optimizer, warmup_steps=args.warmup_steps, t_total=t_total)
-    else:
-        scheduler = util.WarmupLinearSchedule(optimizer, warmup_steps=args.warmup_steps, t_total=t_total)
+    lr_scheduler = util.WarmupLinearSchedule(optimizer, args.warmup_steps, t_total)
 
     # training process
     model.train()
@@ -284,13 +289,14 @@ def train(model, optimizer, crit_ce, crit_box, imgshape, loss_weight):
                         total=args.step_per_epoch,
                         postfix=dict,
                         dynamic_ncols=True,
-                        disable=args.local_rank not in [-1, 0])
+                        disable=args.local_rank not in [-1, 0],
+                        mininterval=5,
+                        delay=5)
 
         for step, batch in enumerate(epoch_iterator):
-            img, input_node, targets, imgfiles, swcfiles = batch
+            img, targets, imgfiles, swcfiles = batch
 
             img_d = img.to(args.device)
-            input_node_d = input_node.to(args.device)
             targets_d = [{'labels': v['labels'].to(args.device), 'poses': v['poses'].to(args.device)} for v in targets]
 
             loss_tmp = {}
@@ -298,7 +304,7 @@ def train(model, optimizer, crit_ce, crit_box, imgshape, loss_weight):
             optimizer.zero_grad()
             if args.amp:
                 with autocast():
-                    pred = model(img_d, input_node_d)
+                    pred = model(img_d)
                     loss_dict = criterion(pred, targets_d)
                     loss_tmp = loss_dict
                     losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
@@ -308,16 +314,16 @@ def train(model, optimizer, crit_ce, crit_box, imgshape, loss_weight):
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 grad_scaler.step(optimizer)
                 grad_scaler.update()
-                scheduler.step()
+                lr_scheduler.step()
             else:
-                pred = model(img_d, input_node_d)
+                pred = model(img_d)
                 loss_dict = criterion(pred, targets)
                 loss_tmp = loss_dict
                 losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)              
                 losses.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
                 optimizer.step()
-                scheduler.step()
+                lr_scheduler.step()
 
             # train statistics for bebug afterward
             # if step % args.print_frequency == 0:
@@ -330,11 +336,11 @@ def train(model, optimizer, crit_ce, crit_box, imgshape, loss_weight):
         if args.test_frequency != 0 and epoch !=0 and epoch % args.test_frequency == 0:
             val_loader, val_iter = load_dataset('val', imgshape)
             ddp_print('Evaluate on val set')
-            loss_val= validate(model, criterion, val_loader, weight_dict, epoch, debug=debug,
+            loss_ce_val, loss_pos_val, loss_val = validate(model, criterion, val_loader, weight_dict, epoch, debug=debug,
                                                             phase='val')
 
             model.train()  # back to train phase
-            ddp_print(f'[Val{epoch}] average loss is {loss_val}')
+            ddp_print(f'[Val_{epoch}] average loss_ce loss_pos loss_all are {loss_ce_val}  {loss_pos_val}  {loss_val}')
             # save the model
             if args.is_master:
                 # save current model
@@ -342,7 +348,7 @@ def train(model, optimizer, crit_ce, crit_box, imgshape, loss_weight):
 
         # save image for subsequent analysis
         if debug and args.is_master and epoch % args.test_frequency == 0:
-            save_image_in_training(imgfiles, img, input_node, targets, pred, epoch, 'train', debug_idx)
+            save_image_in_training(imgfiles, img, targets, pred, epoch, 'train', debug_idx)
 
 
 def main():
@@ -396,10 +402,8 @@ def main():
     if args.checkpoint:
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=args.weight_decay, amsgrad=True)
     else:
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=args.weight_decay, amsgrad=True)
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
-    crit_ce = nn.CrossEntropyLoss(ignore_index=SEQ_PAD, reduction='none').to(args.device)
-    crit_box = nn.HuberLoss(reduction='none', delta=0.1).to(args.device)
     args.imgshape = tuple(map(int, args.image_shape.split(',')))
     loss_weight = list(map(float, args.loss_weight.split(',')))
     # sum_weights = sum(loss_weight)
@@ -410,9 +414,9 @@ def main():
     ddp_print(f'   {args}')
 
     if args.evaluation:
-        evaluate(model, optimizer, crit_ce, crit_box, args.imgshape, args.phase, loss_weight)
+        evaluate(model, optimizer, args.imgshape, args.phase)
     else:
-        train(model, optimizer, crit_ce, crit_box, args.imgshape, loss_weight)
+        train(model, optimizer, args.imgshape)
 
 
 if __name__ == '__main__':
