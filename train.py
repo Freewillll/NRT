@@ -26,6 +26,7 @@ from models import ntt
 from utils import util
 from utils.image_util import unnormalize_normal
 from datasets.dataset import *
+from evaluation.evaluation import *
 
 from path_util import *
 from file_io import *
@@ -123,21 +124,22 @@ def draw_seq(img, pos, labels):
     # print(pos)
     # print(labels)
     nodes = pos.cpu().numpy().copy()
-    nodes = np.clip(util.pos_unnormalize(nodes, img.shape[1:]), [0,0,0], [i -1 for i in img.shape[1:]]).astype(int)
+    if len(nodes) != 0:
+        nodes = np.clip(util.pos_unnormalize(nodes, img.shape[1:]), [0,0,0], [i -1 for i in img.shape[1:]]).astype(int)
 
-    # draw nodes
-    for idx, node in enumerate(nodes):
-        if labels[idx] == 1: # soma white
-            img[:, node[0], node[1], node[2]] = 255
-        elif labels[idx] == 2: # branching point yellow
-            img[0, node[0], node[1], node[2]] = 255
-        elif labels[idx] == 3: # tip blue
-            img[2, node[0], node[1], node[2]] = 255
-        elif labels[idx] == 4: #boundary blue
-            img[2, node[0], node[1], node[2]] = 255
-            
-    selem = np.ones((1,2,3,3), dtype=np.uint8)
-    img = morphology.dilation(img, selem)
+        # draw nodes
+        for idx, node in enumerate(nodes):
+            if labels[idx] == 1: # soma white
+                img[:, node[0], node[1], node[2]] = 255
+            elif labels[idx] == 2: # branching point yellow
+                img[0, node[0], node[1], node[2]] = 255
+            elif labels[idx] == 3: # tip blue
+                img[2, node[0], node[1], node[2]] = 255
+            elif labels[idx] == 4: #boundary blue
+                img[2, node[0], node[1], node[2]] = 255
+                
+        selem = np.ones((1,2,3,3), dtype=np.uint8)
+        img = morphology.dilation(img, selem)
     return img
 
 
@@ -186,7 +188,6 @@ def validate(model, criterion ,val_loader, weight_dict, epoch, debug=True, num_i
         
     loss_ce = 0
     loss_pos = 0
-
     processed = 0
     for img, targets, imgfiles, swcfiles in val_loader:
         processed += 1
@@ -194,17 +195,7 @@ def validate(model, criterion ,val_loader, weight_dict, epoch, debug=True, num_i
         img_d = img.to(args.device)
         targets_d = [{'labels': v['labels'].to(args.device), 'poses': v['poses'].to(args.device)} for v in targets]
         
-        if args.amp:
-            with autocast():
-                with torch.no_grad():
-                    pred = model(img_d)
-        
-                    loss_dict = criterion(pred, targets_d)
-                    loss_ce += loss_dict['loss_ce']
-                    loss_pos += loss_dict['loss_pos']
-                    losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)        
-                    loss_all += losses  
-        else:
+        if phase == 'val':
             with torch.no_grad():
                 pred = model(img_d)
                 loss_dict = criterion(pred, targets_d)
@@ -213,7 +204,55 @@ def validate(model, criterion ,val_loader, weight_dict, epoch, debug=True, num_i
                 losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)        
                 loss_all += losses  
                 
+        elif phase == 'test' or phase == 'par':
+            ddp_print(f'==> processed: {processed} current:{imgfiles}')
+            noce = MostFitCropEvaluation(args.imgshape)
+            assert args.batch_size == 1, "Batch size must be 1 for test phase for current version"
 
+            crops, crop_sizes, lab_crops, index_list = noce.get_image_crops(img_d[0])
+            points = []
+            
+            with torch.no_grad():
+                for i in range(len(crops)):
+                    pred = model(crops[i][None])
+                    loss_dict = criterion(pred, targets_d)
+                    loss_ce += loss_dict['loss_ce']
+                    loss_pos += loss_dict['loss_pos']
+                    losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
+                    loss_all += losses
+                    
+                    zi, yi, xi = index_list[i]
+                    offset_z = zi * crop_sizes[0]
+                    offset_y = yi * crop_sizes[1]
+                    offset_x = xi * crop_sizes[2]
+                    pred_cls = torch.argmax(pred['pred_logits'][0], dim=-1)
+                    pred_pos = pred['pred_poses'][0]
+                    nodes = pred_pos.cpu().numpy().copy()
+                    nodes = util.pos_unnormalize(nodes, crop_sizes)
+                    
+                    nodes[:,0] += offset_z
+                    nodes[:,1] += offset_y
+                    nodes[:,2] += offset_x
+                    
+                    for idx, node in enumerate(nodes):
+                        type_ = pred_cls[idx].cpu().numpy()
+                        # print(node, type_)
+                        points.append((node[0], node[1], node[2], type_))  
+                        
+                    # if i > 5:
+                    #     print(imgfiles)
+                    #     print(f'points: {points}')
+                    #     return 0 
+                                 
+            prefix = get_file_prefix(imgfiles[0])
+            save_file = os.path.join(args.save_folder, f'{prefix}_pred.marker')
+            util.write_marker(points, save_file)
+            
+            del crops, lab_crops
+
+        else:
+            raise ValueError
+                
         del img_d
         del targets_d
 
@@ -253,9 +292,13 @@ def load_dataset(phase, imgshape):
 def evaluate(model, optimizer, imgshape, phase):
     val_loader, val_iter = load_dataset(phase, imgshape)
     args.curr_epoch = 0
-    loss_ce, loss_dice, *_ = validate(model, val_loader, epoch=0, debug=True, num_image_save=-1,
+    matcher = build_matcher(args)
+    weight_dict = {'loss_ce': 1, 'loss_pos': args.weight_loss_poses}
+    losses = ['labels', 'poses']
+    criterion = SetCriterion(num_classes=args.num_classes, pad=args.pad, matcher=matcher, weight_dict=weight_dict, weight_pad=args.weight_pad, losses=losses)
+    loss_ce, loss_pos, *_ = validate(model, criterion, val_loader, weight_dict, epoch=0, debug=True, num_image_save=-1,
                                         phase=phase)
-    ddp_print(f'Average loss_ce and loss_dice: {loss_ce:.5f} {loss_dice:.5f}')
+    ddp_print(f'Average loss_ce and loss_pos: {loss_ce:.5f} {loss_pos:.5f}')
 
 
 def train(model, optimizer, imgshape):
@@ -386,8 +429,8 @@ def main():
     if args.checkpoint:
         # load checkpoint
         ddp_print(f'Loading checkpoint: {args.checkpoint}')
-        checkpoint = torch.load(args.checkpoint, map_location={'cuda:0': f'cuda:{args.local_rank}'})
-        model.load_state_dict(checkpoint.module.state_dict())
+        checkpoint = torch.load(args.checkpoint, map_location='cuda:0')
+        model.load_state_dict(checkpoint.state_dict())
         del checkpoint
         # if args.is_master:
         #    torch.save(checkpoint.module.state_dict(), "exp040.state_dict")

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-exp_folder="exps/debug_22"
+exp_folder="exps/debug_24"
 mkdir -p $exp_folder
 # mkdir -p ${exp_folder}/debug
 
@@ -15,7 +15,7 @@ CUDA_VISIBLE_DEVICES=1 nohup \
 python -u train.py \
     --deterministic \
     --weight_decay 1e-4 \
-    --max_epochs 350 \
+    --max_epochs 400 \
     --save_folder ${exp_folder}/debug \
     --amp \
     --weight_pad 0.1\
@@ -23,8 +23,8 @@ python -u train.py \
     --step_per_epoch 200 \
     --test_frequency 10 \
     --max_grad_norm 1.0 \
-    --image_shape 32,64,64 \
+    --image_shape 128,256,256 \
     --seed 1025 \
-    --batch_size 32 \
+    --batch_size 1 \
     --data_file '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task002_ntt_256/data_splits.pkl' \
     > ${exp_folder}/train.log &

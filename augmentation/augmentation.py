@@ -596,7 +596,7 @@ class InstanceAugmentation(object):
             self.augment = Compose([
                 ConvertToFloat(),
                 # CenterCrop(1.0, imgshape),
-                RandomCrop(1.0, imgshape, crop_range=(1.0, 1.2), force_fg_sampling=True),
+                RandomCrop(1.0, imgshape, crop_range=(1.0, 1.2), force_fg_sampling=False),
                 RandomGammaTransformDualModes(p=p, gamma_range=(0.7, 1.4), per_channel=False, retain_stats=False),
                 RandomGaussianNoise(p=p),
                 # RandomSaturation(p=p),
@@ -609,7 +609,7 @@ class InstanceAugmentation(object):
         elif phase == 'val':
             self.augment = Compose([
                 ConvertToFloat(),
-                RandomCrop(1.0, imgshape, crop_range=(1.0, 1.0), force_fg_sampling=True),
+                RandomCrop(1.0, imgshape, crop_range=(1.0, 1.0), force_fg_sampling=False),
             ])
         elif phase == 'test' or phase == 'par':
             self.augment = Compose([

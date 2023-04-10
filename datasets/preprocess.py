@@ -45,6 +45,27 @@ def load_data(data_dir, img_shape=[128, 256, 256], is_train=True, nums_data=1):
     return data_list
 
 
+def load_data_test(data_dir, img_shape=[128, 256, 256], is_train=True):
+
+    # load the spacing file
+    img_dir = data_dir
+    # get all annotated data
+    nums = 0
+    data_list = []
+    for img_file in glob.glob(os.path.join(img_dir, '*.v3draw')):
+        swc_dir = os.path.join(data_dir, 'swc', str(img_shape[1]), 'final')
+        prefix = get_file_prefix(img_file)
+        if is_train:
+            swc_file = os.path.join(swc_dir, f'{prefix}.swc')
+        else:
+            swc_file = None
+        data_list.append((img_file, swc_file, img_shape))
+        nums += 1
+
+    return data_list
+
+
+
 class GenericPreprocessor(object):
 
     def remove_nans(self, data):
@@ -82,7 +103,8 @@ class GenericPreprocessor(object):
     def run(self, data_dir, output_dir, img_shape=[128, 256, 256], is_train=True, num_threads=8, nums_data=8):
         print('Processing for dataset, should be run at least once for each dataset!')
         # get all files
-        data_list = load_data(data_dir, img_shape, is_train=is_train, nums_data=nums_data)
+        # data_list = load_data(data_dir, img_shape, is_train=is_train, nums_data=nums_data)
+        data_list = load_data_test(data_dir, img_shape, is_train)
         print(f'Total number of samples found: {len(data_list)}')
 
         maybe_mkdir_p(output_dir)
@@ -134,10 +156,10 @@ class GenericPreprocessor(object):
 
 
 if __name__ == '__main__':
-    data_dir = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/dataset'
-    output_dir = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task004_ntt_debug'
-    is_train = True
+    data_dir = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/dataset/img/256/downsample_test/'
+    output_dir = '/PBshare/SEU-ALLEN/Users/Gaoyu/Neuron_dataset/Task008_ntt_test_downsample'
+    is_train = False
     num_threads = 16
     gp = GenericPreprocessor()
     gp.run(data_dir, output_dir, img_shape=[128, 256, 256], is_train=is_train, num_threads=num_threads, nums_data=10)
-    gp.dataset_split(output_dir, val_ratio=0.1, test_ratio=0.1, seed=1024, img_ext='.npz', lab_ext='.swc')
+    gp.dataset_split(output_dir, val_ratio=0, test_ratio=1.0, seed=1024, img_ext='.npz', lab_ext='.swc')

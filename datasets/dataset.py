@@ -110,7 +110,8 @@ class GenericDataset(tudata.Dataset):
 
         if img.ndim == 3:
             img = img[None]
-
+            
+        tree = None
         if swcfile is not None and self.phase != 'test':
             tree = parse_swc(swcfile)
 
@@ -119,16 +120,20 @@ class GenericDataset(tudata.Dataset):
 
         if tree is not None and self.phase != 'test':
             tree_crop = trim_out_of_box(tree, img[0].shape, True)
-            poses, labels = swc_to_points(tree_crop, img[0].shape)
-            poses = poses[:num_nodes]
-            labels = labels[:num_nodes]
+            poses = []
+            labels =[]
+            if len(tree_crop) != 0:
+                poses, labels = swc_to_points(tree_crop, img[0].shape)
+                poses = poses[:num_nodes]
+                labels = labels[:num_nodes]
 
             target = {'poses': torch.tensor(poses, dtype=torch.float32), 'labels': torch.tensor(labels, dtype=torch.int64)}
             return torch.from_numpy(img.astype(np.float32)), target, imgfile, swcfile
         else:
-            lab = np.random.randn((2, self.seq_node_nums, self.node_dim)) > 0.5
-            cls_ = np.random.randn((2, self.seq_node_nums)) > 0.5
-            return torch.from_numpy(img.astype(np.float32)), torch.from_numpy(lab.astype(np.float32)), torch.from_numpy(cls_.astype(np.int64)), imgfile, swcfile
+            poses = np.random.randn(2, 3)
+            labels = np.random.randn(2) > 0.5
+            target = {'poses': torch.tensor(poses, dtype=torch.float32), 'labels': torch.tensor(labels, dtype=torch.int64)}
+            return torch.from_numpy(img.astype(np.float32)), target, imgfile, swcfile
 
 
 if __name__ == '__main__':

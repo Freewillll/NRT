@@ -9,5 +9,5 @@
   "heads": 8,
   "mlp_dim": 2048,
   "dropout": 0.1,
-  "num_queries" : 20
+  "num_queries" : 110
 }

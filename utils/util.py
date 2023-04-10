@@ -117,3 +117,22 @@ def accuracy_nomask(pred_cls, pred_pos, lab_cls, lab_pos, image_shape):
     accuracy_pos = (dist <= 5).mean()
     return accuracy_cls, accuracy_pos
 
+
+def write_marker(marker_list, marker_file, scale=[1,1,1]):
+    r = 2
+    with open(marker_file, 'w') as fp:
+        fp.write(f'##x, y, z, radius, shape, name, comment, color_r,color_g,color_b\n')
+        for line in marker_list:
+            z, y, x, type_ = line
+            z *= scale[0]
+            y *= scale[1]
+            x *= scale[2]
+            if type_ == 1:
+                fp.write(f'{x:.2f}, {y:.2f}, {z:.2f} , {r:.2f}, 1, 0, 0, 0,0,0 \n')
+            elif type_ == 2:
+                fp.write(f'{x:.2f}, {y:.2f}, {z:.2f} , {r:.2f}, 1, 0, 0, 255,0,0 \n')
+            elif type_== 3:
+                fp.write(f'{x:.2f}, {y:.2f}, {z:.2f} , {r:.2f}, 1, 0, 0, 0,255,0 \n')
+            elif type_ == 4:
+                fp.write(f'{x:.2f}, {y:.2f}, {z:.2f} , {r:.2f}, 1, 0, 0, 0,0,255 \n')
+
