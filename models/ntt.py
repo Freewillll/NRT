@@ -98,7 +98,7 @@ class MLP(nn.Module):
 
 class NTT(nn.Module):
     def __init__(self, in_channels, base_num_filters, num_classes, down_kernel_list, stride_list,
-                 dim, depth, heads, mlp_dim, dropout, num_queries):
+                 dim, encoder_depth, decoder_depth, heads, mlp_dim, dropout, num_queries):
         super(NTT, self).__init__()
         assert len(down_kernel_list) == len(stride_list)
         self.downs = []
@@ -133,7 +133,7 @@ class NTT(nn.Module):
         
         self.input_proj = nn.Conv3d(out_channels, dim, kernel_size=1)
         self.query_embed = nn.Embedding(num_queries, dim)
-        self.transformer = Transformer(dim, heads, depth, depth,mlp_dim, dropout)
+        self.transformer = Transformer(dim, heads, encoder_depth, decoder_depth, mlp_dim, dropout)
 
         # convert layers to nn containers
         self.downs = nn.ModuleList(self.downs)

@@ -88,6 +88,10 @@ def pos_unnormalize(pos, image_shape):
     return pos
 
 
+# def metric(pred, lab):
+
+
+
 def accuracy_withmask(pred_cls, pred_pos, lab_cls, lab_pos, pos_mask, image_shape):
     # pred_cls: b, cls, nodes, n
     # mask: b, n, nodes

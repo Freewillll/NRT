@@ -1,4 +1,4 @@
-exp_folder="exps/test_06"
+exp_folder="exps/debug_27_ablation_decoder3"
 mkdir -p $exp_folder
 save_folder=${exp_folder}/evaluation
 
@@ -21,7 +21,7 @@ python -u train.py \
     --phase 'test'\
     --seed 1025 \
     --evaluation \
-    --checkpoint 'exps/debug_21/debug/final_model.pt'\
+    --checkpoint 'exps/debug_27_ablation_decoder3/debug/final_model.pt'\
     --image_shape '64,128,128' \
     --batch_size 1 \
     --net_config './models/configs/default_config.json'\
